@@ -1,0 +1,5 @@
+# Companion packages for the wifi-8821cu recipe -- configure over the
+# serial console (networkmanager-tui), regulatory database + firmware
+# for rtw88-family chips.
+linux-firmware-rtw88
+wireless-regdb

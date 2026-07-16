@@ -1,0 +1,3 @@
+# RTL8821CU USB wifi dongle -- see tools/recipes/README.md.
+wifi-8821cu
+zstd-modules

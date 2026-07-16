@@ -1,0 +1,24 @@
+setenv bootargs earlyprintk console=ttyS0,115200 root=/dev/mmcblk0p1 rw noinitrd rootwait
+
+# Load main device tree
+load mmc 0:1 0x43000000 boot/@DTB_FILE@
+fdt addr 0x43000000
+fdt resize 8192
+
+# Dynamic overlay loading (auto-generated at build time from whatever's in
+# this target's overlays/*.dts)
+setenv overlay_files ""
+
+# Load each overlay in the list
+for overlay_file in ${overlay_files}; do
+    if load mmc 0:1 0x44000000 boot/overlay/${overlay_file}; then
+        echo "Loading overlay: ${overlay_file}"
+        fdt apply 0x44000000
+    else
+        echo "Overlay not found: ${overlay_file}"
+    fi
+done
+
+# Load kernel and boot
+load mmc 0:1 0x41000000 boot/zImage
+bootz 0x41000000 - 0x43000000
