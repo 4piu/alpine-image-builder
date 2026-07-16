@@ -2,15 +2,15 @@
 # Alpine SBC image builder
 #
 # Usage:
-#   make build TARGET=<name> [CUSTOM_PROFILE=<name>]
+#   make build TARGET=<name> [PROFILE=<name>]
 #
-# See target/README.md for what TARGET/CUSTOM_PROFILE mean and how a
+# See target/README.md for what TARGET/PROFILE mean and how a
 # target's board.env resolves; notes/build-pipeline-brainstorm.md §2/§3
 # for the reasoning behind the shape of this file.
 ################################################################################
 
 TARGET ?=
-CUSTOM_PROFILE ?=
+PROFILE ?=
 BOARD ?=
 
 ifeq ($(TARGET),)
@@ -66,13 +66,13 @@ UBOOT_FORMAT_CUSTOM_NAME ?= u-boot-sunxi-with-spl.bin
 ROOTFS_URL = https://dl-cdn.alpinelinux.org/alpine/$(ALPINE_VERSION)
 
 TARGET_DIR := target/$(TARGET)
-PROFILE_NAME := $(if $(CUSTOM_PROFILE),$(CUSTOM_PROFILE),base)
-PROFILE_DIR := $(TARGET_DIR)/profiles/$(CUSTOM_PROFILE)
+PROFILE_NAME := $(if $(PROFILE),$(PROFILE),base)
+PROFILE_DIR := $(TARGET_DIR)/profiles/$(PROFILE)
 COMMON_DIR := $(TARGET_DIR)/common
 OUTPUT_DIR := output/$(TARGET)/$(PROFILE_NAME)
 
 ################################################################################
-## Customization merge chain: board manifest -> common/ -> profiles/$(CUSTOM_PROFILE)/
+## Customization merge chain: board manifest -> common/ -> profiles/$(PROFILE)/
 ## (§3/§4). Every artifact below resolves the same way: whichever pieces
 ## are present at each stage apply; an unmodified target (nothing under
 ## common/ or profiles/) builds a stock, vanilla image.
@@ -119,7 +119,7 @@ $(foreach f,$(COMMON_RECIPE_FRAGMENTS) $(PROFILE_RECIPE_FRAGMENTS),$(if $(wildca
 
 # Kernel config: fragments merged onto the stock base defconfig via
 # merge_config.sh, common/ first (kernel.config then its recipes.txt) so
-# profiles/$(CUSTOM_PROFILE)/ (kernel.config then its recipes.txt) can
+# profiles/$(PROFILE)/ (kernel.config then its recipes.txt) can
 # override it, never a full-file replacement (§4).
 # $(strip ...) matters here, not just tidiness: if all the wildcards are
 # empty, the bare concatenation is a run of literal spaces (the spaces
@@ -132,7 +132,7 @@ KERNEL_CONFIG_FRAGMENTS := $(strip $(wildcard $(COMMON_DIR)/kernel.config) $(COM
 # Kernel source patches -- applied in the same common-then-profile order,
 # must apply cleanly or the build hard-fails ("Before starting", open
 # questions). Unlike kernel.config fragments, these mutate the shared
-# sources/linux tree directly, so switching TARGET/CUSTOM_PROFILE has to
+# sources/linux tree directly, so switching TARGET/PROFILE has to
 # reset and reapply, not accumulate -- see prepare-linux-tree.sh.
 PATCH_FILES := $(strip $(sort $(wildcard $(COMMON_DIR)/patches/*.patch)) $(sort $(wildcard $(PROFILE_DIR)/patches/*.patch)))
 
@@ -184,7 +184,7 @@ endif
 # checks above, but for patches/DTS-override: these mutate sources/linux
 # directly rather than swapping out a whole file, so a plain mtime-based
 # Make prerequisite can't detect "the SET of applicable patches changed
-# since the last build" (switching TARGET/CUSTOM_PROFILE can shrink the
+# since the last build" (switching TARGET/PROFILE can shrink the
 # set, which a file that's merely *newer* can't express). Run the check
 # immediately, at parse time, same as the version checks -- and if the
 # tree actually needed resetting, drop the stale .config so Make's normal
@@ -193,7 +193,7 @@ endif
 ifneq ($(wildcard sources/linux/.git),)
 PREPARE_LINUX_TREE_RESULT := $(shell ./prepare-linux-tree.sh sources/linux sources/.tree-prepared $(KERNEL_DT_FILE) "$(DTS_OVERRIDE)" $(PATCH_FILES))
 ifneq ($(.SHELLSTATUS),0)
-$(error Preparing sources/linux for TARGET=$(TARGET) CUSTOM_PROFILE=$(CUSTOM_PROFILE) failed -- see output above)
+$(error Preparing sources/linux for TARGET=$(TARGET) PROFILE=$(PROFILE) failed -- see output above)
 endif
 ifeq ($(PREPARE_LINUX_TREE_RESULT),CHANGED)
 $(shell rm -f sources/linux/.config)
@@ -243,7 +243,7 @@ overlays: $(OVERLAY_TARGETS)
 .PHONY: overlay-check
 overlay-check: $(word 2,$(KERNEL_PRODUCTS_OUTPUT)) $(OVERLAY_TARGETS)
 	@if [ -z "$(OVERLAY_TARGETS)" ]; then \
-		echo "No overlays for TARGET=$(TARGET) CUSTOM_PROFILE=$(CUSTOM_PROFILE) -- nothing to check."; \
+		echo "No overlays for TARGET=$(TARGET) PROFILE=$(PROFILE) -- nothing to check."; \
 		exit 0; \
 	fi
 	fdtoverlay -i $(word 2,$(KERNEL_PRODUCTS_OUTPUT)) -o $(OUTPUT_DIR)/overlay-check.dtb $(OVERLAY_TARGETS)

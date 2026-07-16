@@ -18,8 +18,8 @@ on:
         description: "Override ALPINE_VERSION (blank = this target's board.env default)"
         required: false
         type: string
-      custom_profile:
-        description: "CUSTOM_PROFILE to build (blank = stock/base)"
+      profile:
+        description: "PROFILE to build (blank = stock/base)"
         required: false
         type: string
 
@@ -105,12 +105,12 @@ jobs:
           args="TARGET=${{ matrix.target }}"
           [ -n "${{ inputs.kernel_version }}" ] && args="$args KERNEL_VERSION=${{ inputs.kernel_version }}"
           [ -n "${{ inputs.alpine_version }}" ] && args="$args ALPINE_VERSION=${{ inputs.alpine_version }}"
-          [ -n "${{ inputs.custom_profile }}" ] && args="$args CUSTOM_PROFILE=${{ inputs.custom_profile }}"
+          [ -n "${{ inputs.profile }}" ] && args="$args PROFILE=${{ inputs.profile }}"
           make build $args
 
       - name: Upload image
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}-${{ inputs.custom_profile || 'base' }}
+          name: ${{ matrix.target }}-${{ inputs.profile || 'base' }}
           path: output/${{ matrix.target }}/**/alpine.img
           if-no-files-found: error

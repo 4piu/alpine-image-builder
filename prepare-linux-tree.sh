@@ -5,7 +5,7 @@
 # sources/linux is shared across whichever target/profile you build next
 # (see Makefile), so unlike kernel.config fragments -- which never touch
 # the tree, only get merged into .config -- patches and a DTS override
-# physically mutate tracked files. Switching TARGET/CUSTOM_PROFILE between
+# physically mutate tracked files. Switching TARGET/PROFILE between
 # builds has to reset and reapply, not accumulate. A fingerprint of the
 # current patch/override set is stamped into $marker_file so repeat
 # invocations with an unchanged set are a fast no-op.

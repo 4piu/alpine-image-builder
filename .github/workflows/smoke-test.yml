@@ -1,7 +1,7 @@
 name: Smoke test
 
 # Validates that every target/*/ in this repo still builds -- stock
-# config only, no CUSTOM_PROFILE -- as upstream defconfigs/DTs move.
+# config only, no PROFILE -- as upstream defconfigs/DTs move.
 # Compile-check only: no boot-testing, no hardware in the loop.
 on:
   pull_request:

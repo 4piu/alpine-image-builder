@@ -43,11 +43,11 @@ Run `make check-tools` to verify before building.
 ## Building
 
 ```
-make build TARGET=<name> CUSTOM_PROFILE=<name>   # CUSTOM_PROFILE optional
+make build TARGET=<name> PROFILE=<name>   # PROFILE optional
 ```
 
 Starting targets: `nanopi-neo`, `zeropi`. Both carry a real
-`profiles/wifi` (`CUSTOM_PROFILE=wifi`) for an RTL8821CU USB dongle,
+`profiles/wifi` (`PROFILE=wifi`) for an RTL8821CU USB dongle,
 worth a look as a working example. `nanopi-neo` also enables its second
 USB host controller by default.
 

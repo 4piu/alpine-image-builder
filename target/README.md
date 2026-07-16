@@ -92,7 +92,7 @@ Pick a clear, kebab-case name.
 
 ```
 make build TARGET=<name>
-make build TARGET=<name> CUSTOM_PROFILE=<profile-name>
+make build TARGET=<name> PROFILE=<profile-name>
 ```
 
 ## Kernel config: `kernel.config`
@@ -200,8 +200,8 @@ Overlay *selection* is decided at build time (baked into `boot.scr`);
 toggling one means a rebuild, not a runtime edit.
 
 ```
-make overlays TARGET=<name> CUSTOM_PROFILE=<profile-name>   # compile only
-make overlay-check TARGET=<name> CUSTOM_PROFILE=<profile-name>   # compile + preview the merged DT
+make overlays TARGET=<name> PROFILE=<profile-name>   # compile only
+make overlay-check TARGET=<name> PROFILE=<profile-name>   # compile + preview the merged DT
 ```
 
 `overlay-check` needs `fdtoverlay` (not part of `make check-tools`'s
