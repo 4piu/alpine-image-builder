@@ -22,12 +22,11 @@ CONFIG_MODULE_COMPRESS_ZSTD=y
 `menuconfig` does **not** enable this as a dependency of building a
 module — it's easy to flip on the driver you wanted, get a clean build,
 and then find `modprobe` silently fails to load it on the actual board.
-This isn't forced on by default (a stock, unmodified target deliberately
-ships without it — see `notes/build-pipeline-brainstorm.md` §2/§4 for
-why): a base image that never loads a module shouldn't carry a deviation
-from stock nobody asked for. It only becomes *your* problem the moment
-your own fragment adds a module — at which point it's squarely your
-problem, and now you know about it.
+This isn't forced on by default: a stock, unmodified target ships
+without it, since a base image that never loads a module shouldn't
+carry a deviation from stock nobody asked for. It only becomes *your*
+problem the moment your own fragment adds a module — at which point it's
+squarely your problem, and now you know about it.
 
 ## Symbols that must stay builtin (`=y`), never a module (`=m`)
 

@@ -1,24 +1,15 @@
 name: Scheduled rebuild
 
-# Off by default (§1, §7). Enable by setting the repository variable
+# Off by default. Enable by setting the repository variable
 # SCHEDULED_REBUILD_ENABLED to "true" (Settings -> Secrets and variables
-# -> Actions -> Variables) -- no YAML edit needed to opt in, this file
-# ships already wired up.
+# -> Actions -> Variables).
 #
-# Scope note, discovered while implementing this rather than assumed
-# away: §7/§8 originally described this as rebuilding on a new kernel
-# *point* release (v6.18.x -> v6.18.y, "safe to auto-rebuild") while
-# treating a major bump as requiring a deliberate KERNEL_VERSION edit.
-# That doesn't actually apply to how this repo clones the kernel --
-# board.env's KERNEL_VERSION pins a tag on torvalds/linux (mainline),
-# which doesn't carry point-release tags at all (those only exist on the
-# separate linux-stable tree). A pinned mainline tag is immutable, so it
-# cannot drift without someone editing board.env, which already requires
-# deliberate action either way -- there's nothing here for this workflow
-# to usefully auto-detect on the kernel/U-Boot side. What *does* drift
-# within a pinned ALPINE_VERSION branch is the apk package index (fixes,
-# security updates), so that's what this actually checks. Revisit if
-# KERNEL_VERSION ever starts tracking linux-stable instead.
+# Checks whether the Alpine package index for each target's pinned
+# ALPINE_VERSION has changed since the last run, and only rebuilds
+# targets where it has. KERNEL_VERSION/UBOOT_VERSION are pinned to a
+# fixed git tag and don't drift on their own, so they're not part of
+# this check -- bump those in board.env deliberately when you want a
+# newer kernel/U-Boot.
 on:
   schedule:
     - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC -- arbitrary off-peak slot
@@ -33,11 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Small persisted state (one Alpine APKINDEX ETag per target) is
-      # what makes "did anything actually change" checkable across runs
-      # without a database -- restore-keys' prefix match always finds the
-      # most recent previous run's save, and the primary key always
-      # includes run_id so this run's save never collides with it.
+      # Persists one Alpine APKINDEX ETag per target across runs via
+      # actions/cache (restore-keys finds the most recent save; the
+      # primary key includes run_id so this run's save never collides).
       - name: Restore last-known Alpine index state
         uses: actions/cache/restore@v4
         with:

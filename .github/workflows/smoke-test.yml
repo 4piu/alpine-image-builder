@@ -2,10 +2,7 @@ name: Smoke test
 
 # Validates that every target/*/ in this repo still builds -- stock
 # config only, no CUSTOM_PROFILE -- as upstream defconfigs/DTs move.
-# Independent of anyone's personal profiles (§2). CI's job here is "does
-# it compile," nothing more -- no boot-testing, no hardware in the loop
-# (notes/build-pipeline-brainstorm.md, Open questions: "board-support
-# boundary").
+# Compile-check only: no boot-testing, no hardware in the loop.
 on:
   pull_request:
     paths:

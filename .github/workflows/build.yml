@@ -1,9 +1,8 @@
 name: Build
 
-# Convenience wrapper around `make build` for your own fork -- see
-# README.md and notes/build-pipeline-brainstorm.md §7. Every input maps
-# straight onto a `make` variable; nothing board-specific lives in this
-# file.
+# Convenience wrapper around `make build` for your own fork. Every input
+# maps straight onto a `make` variable; nothing board-specific lives in
+# this file.
 on:
   workflow_dispatch:
     inputs:
@@ -61,10 +60,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Package names are Ubuntu's, matched to check-tools.sh's required
-      # list and board.env's CROSS_COMPILE=arm-none-eabi- -- not yet
-      # verified against a real runner (this repo was built without apt
-      # access), so a first real run is the actual test of this list.
+      # Ubuntu package names, matched to check-tools.sh's required list
+      # and board.env's CROSS_COMPILE=arm-none-eabi-.
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -73,10 +70,8 @@ jobs:
             device-tree-compiler u-boot-tools zstd \
             kpartx swig python3-setuptools python3-pyelftools ccache
 
-      # ccache transparently intercepts arm-none-eabi-gcc via a symlink
-      # ahead of the real toolchain in PATH, rather than touching
-      # CROSS_COMPILE/board.env -- keeps this entirely a CI-only concern
-      # (§8), no board-specific logic added to the Makefile for it.
+      # ccache intercepts arm-none-eabi-gcc via a symlink ahead of the
+      # real toolchain in PATH, rather than touching CROSS_COMPILE.
       - name: Wire up ccache for the cross-compiler
         run: |
           dir="/usr/lib/ccache-cross"
@@ -84,12 +79,8 @@ jobs:
           sudo ln -sf "$(command -v ccache)" "$dir/arm-none-eabi-gcc"
           echo "$dir" >> "$GITHUB_PATH"
 
-      # Keyed by SoC (ARCH+KERNEL_DEFCONFIG, the actual dimension board
-      # configs overlap on -- §8), not by board: every board on the same
-      # SoC shares one ccache. Only reads this target's own board.env, so
-      # a future BOARD=-referencing target would need its cache key
-      # derived from the referenced target instead -- fine while both
-      # starting targets are fully self-contained.
+      # Keyed by SoC (ARCH+KERNEL_DEFCONFIG), not by board: every board
+      # on the same SoC shares one ccache.
       - name: Determine cache key
         id: cachekey
         run: |
@@ -117,9 +108,6 @@ jobs:
           [ -n "${{ inputs.custom_profile }}" ] && args="$args CUSTOM_PROFILE=${{ inputs.custom_profile }}"
           make build $args
 
-      # Workflow artifacts only -- not yet published to Releases. §9's
-      # signed-tarball upgrade story is a separate, not-yet-implemented
-      # piece; this is just "get the image off the runner."
       - name: Upload image
         uses: actions/upload-artifact@v4
         with:

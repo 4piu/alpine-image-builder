@@ -2,18 +2,11 @@
 
 A build toolkit for running Alpine Linux on EOL/community-supported SBCs —
 cross-compiles U-Boot + Linux, bootstraps an Alpine root filesystem via
-`apk`, and assembles a bootable `.img`. Successor to the (soon to be
-retired) `nanopi-alpine` and `zeropi-alpine` repos, generalized to support
-more boards without forking.
+`apk`, and assembles a bootable `.img`.
 
 **This is a toolkit you run yourself, not a source of prebuilt images.**
 Clone it, point it at a board, build. GitHub Actions is a convenience
-wrapper around the same `make` targets you'd run locally — not a separate
-product, and not a place to download images from.
-
-Status: early — under active restructuring, not yet fully working. See
-`notes/build-pipeline-brainstorm.md` for the design rationale and
-`notes/implementation-progress.md` for what's actually done so far.
+wrapper around the same `make` targets you'd run locally.
 
 ## Layout
 
@@ -24,14 +17,12 @@ Status: early — under active restructuring, not yet fully working. See
   `profiles/<name>/` (named, opt-in customization sets: kernel config
   fragments, `boot.cmd` overrides, device tree overlays, extra packages,
   a one-time setup script). Nothing beyond `board.env` is required — an
-  unmodified target builds a stock, vanilla image. Adding a new board is
-  a PR adding a `target/<new-board-id>/board.env`, not a fork.
+  unmodified target builds a stock image. Adding a new board is a PR
+  adding a `target/<new-board-id>/board.env`, not a fork.
 - `tools/recipes/` — ready-to-use customization fragments for common
-  cases (e.g. enabling a specific USB wifi chipset), documented on the
-  wiki, meant to be copied into your own `target/<name>/profiles/`.
-- `docs/` — reference docs for customizing the build (currently: kernel
-  config tribal knowledge — module compression, symbols that must stay
-  builtin, the on-device incremental-build escape hatch).
+  cases (e.g. enabling a specific USB wifi chipset), meant to be copied
+  into (or automatically pulled into) your own `target/<name>/profiles/`.
+- `docs/` — reference docs for customizing the build.
 
 ## Requirements
 
@@ -55,9 +46,10 @@ Run `make check-tools` to verify before building.
 make build TARGET=<name> CUSTOM_PROFILE=<name>   # CUSTOM_PROFILE optional
 ```
 
-Starting targets: `nanopi-neo`, `zeropi` — both vanilla by default, both
-also carry a real `profiles/wifi` (`CUSTOM_PROFILE=wifi`) for an
-RTL8821CU USB dongle, worth a look as a working example.
+Starting targets: `nanopi-neo`, `zeropi`. Both carry a real
+`profiles/wifi` (`CUSTOM_PROFILE=wifi`) for an RTL8821CU USB dongle,
+worth a look as a working example. `nanopi-neo` also enables its second
+USB host controller by default.
 
 ## CI (on your own fork)
 
