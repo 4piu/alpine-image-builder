@@ -1,0 +1,130 @@
+name: Scheduled rebuild
+
+# Off by default (§1, §7). Enable by setting the repository variable
+# SCHEDULED_REBUILD_ENABLED to "true" (Settings -> Secrets and variables
+# -> Actions -> Variables) -- no YAML edit needed to opt in, this file
+# ships already wired up.
+#
+# Scope note, discovered while implementing this rather than assumed
+# away: §7/§8 originally described this as rebuilding on a new kernel
+# *point* release (v6.18.x -> v6.18.y, "safe to auto-rebuild") while
+# treating a major bump as requiring a deliberate KERNEL_VERSION edit.
+# That doesn't actually apply to how this repo clones the kernel --
+# board.env's KERNEL_VERSION pins a tag on torvalds/linux (mainline),
+# which doesn't carry point-release tags at all (those only exist on the
+# separate linux-stable tree). A pinned mainline tag is immutable, so it
+# cannot drift without someone editing board.env, which already requires
+# deliberate action either way -- there's nothing here for this workflow
+# to usefully auto-detect on the kernel/U-Boot side. What *does* drift
+# within a pinned ALPINE_VERSION branch is the apk package index (fixes,
+# security updates), so that's what this actually checks. Revisit if
+# KERNEL_VERSION ever starts tracking linux-stable instead.
+on:
+  schedule:
+    - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC -- arbitrary off-peak slot
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: ${{ vars.SCHEDULED_REBUILD_ENABLED == 'true' }}
+    outputs:
+      targets: ${{ steps.check.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Small persisted state (one Alpine APKINDEX ETag per target) is
+      # what makes "did anything actually change" checkable across runs
+      # without a database -- restore-keys' prefix match always finds the
+      # most recent previous run's save, and the primary key always
+      # includes run_id so this run's save never collides with it.
+      - name: Restore last-known Alpine index state
+        uses: actions/cache/restore@v4
+        with:
+          path: .alpine-state
+          key: alpine-state-${{ github.run_id }}
+          restore-keys: |
+            alpine-state-
+
+      - id: check
+        run: |
+          set -e
+          mkdir -p .alpine-state
+          : > .alpine-state/rebuild-list.txt
+          for d in target/*/; do
+            name="$(basename "$d")"
+            [ -f "target/$name/board.env" ] || continue
+            (
+              . "target/$name/board.env"
+              new_etag=$(curl -fsSL -I "https://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/main/$ALPINE_ARCH/APKINDEX.tar.gz" | tr -d '\r' | grep -i '^etag:' | head -1)
+              state_file=".alpine-state/$name"
+              old_etag=""
+              [ -f "$state_file" ] && old_etag=$(cat "$state_file")
+              if [ -n "$new_etag" ]; then
+                echo "$new_etag" > "$state_file"
+              fi
+              if [ -n "$new_etag" ] && [ "$new_etag" != "$old_etag" ]; then
+                echo "$name" >> .alpine-state/rebuild-list.txt
+              fi
+            )
+          done
+          targets=$(jq -R -s -c 'split("\n") | map(select(length > 0))' < .alpine-state/rebuild-list.txt)
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+      - name: Save current Alpine index state
+        uses: actions/cache/save@v4
+        with:
+          path: .alpine-state
+          key: alpine-state-${{ github.run_id }}
+
+  build:
+    needs: check
+    if: ${{ needs.check.outputs.targets != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.check.outputs.targets) }}
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi binutils-arm-none-eabi \
+            device-tree-compiler u-boot-tools zstd \
+            kpartx swig python3-setuptools python3-pyelftools ccache
+
+      - name: Wire up ccache for the cross-compiler
+        run: |
+          dir="/usr/lib/ccache-cross"
+          sudo mkdir -p "$dir"
+          sudo ln -sf "$(command -v ccache)" "$dir/arm-none-eabi-gcc"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Determine cache key
+        id: cachekey
+        run: |
+          . "target/${{ matrix.target }}/board.env"
+          echo "soc=${ARCH}-${KERNEL_DEFCONFIG}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ steps.cachekey.outputs.soc }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ steps.cachekey.outputs.soc }}-
+
+      - name: Build
+        run: make build TARGET=${{ matrix.target }}
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-${{ matrix.target }}
+          path: output/${{ matrix.target }}/**/alpine.img
+          if-no-files-found: error

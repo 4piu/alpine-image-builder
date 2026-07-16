@@ -1,0 +1,128 @@
+name: Build
+
+# Convenience wrapper around `make build` for your own fork -- see
+# README.md and notes/build-pipeline-brainstorm.md §7. Every input maps
+# straight onto a `make` variable; nothing board-specific lives in this
+# file.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Target to build (blank = every target under target/*/)"
+        required: false
+        type: string
+      kernel_version:
+        description: "Override KERNEL_VERSION (blank = this target's board.env default)"
+        required: false
+        type: string
+      alpine_version:
+        description: "Override ALPINE_VERSION (blank = this target's board.env default)"
+        required: false
+        type: string
+      custom_profile:
+        description: "CUSTOM_PROFILE to build (blank = stock/base)"
+        required: false
+        type: string
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: list
+        run: |
+          set -e
+          if [ -n "${{ inputs.target }}" ]; then
+            if [ ! -f "target/${{ inputs.target }}/board.env" ]; then
+              echo "::error::No target/${{ inputs.target }}/board.env in this repo" >&2
+              exit 1
+            fi
+            targets='["${{ inputs.target }}"]'
+          else
+            targets=$(for d in target/*/; do
+              name="$(basename "$d")"
+              [ -f "target/$name/board.env" ] && printf '%s\n' "$name"
+            done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.discover.outputs.targets) }}
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      # Package names are Ubuntu's, matched to check-tools.sh's required
+      # list and board.env's CROSS_COMPILE=arm-none-eabi- -- not yet
+      # verified against a real runner (this repo was built without apt
+      # access), so a first real run is the actual test of this list.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi binutils-arm-none-eabi \
+            device-tree-compiler u-boot-tools zstd \
+            kpartx swig python3-setuptools python3-pyelftools ccache
+
+      # ccache transparently intercepts arm-none-eabi-gcc via a symlink
+      # ahead of the real toolchain in PATH, rather than touching
+      # CROSS_COMPILE/board.env -- keeps this entirely a CI-only concern
+      # (§8), no board-specific logic added to the Makefile for it.
+      - name: Wire up ccache for the cross-compiler
+        run: |
+          dir="/usr/lib/ccache-cross"
+          sudo mkdir -p "$dir"
+          sudo ln -sf "$(command -v ccache)" "$dir/arm-none-eabi-gcc"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      # Keyed by SoC (ARCH+KERNEL_DEFCONFIG, the actual dimension board
+      # configs overlap on -- §8), not by board: every board on the same
+      # SoC shares one ccache. Only reads this target's own board.env, so
+      # a future BOARD=-referencing target would need its cache key
+      # derived from the referenced target instead -- fine while both
+      # starting targets are fully self-contained.
+      - name: Determine cache key
+        id: cachekey
+        run: |
+          . "target/${{ matrix.target }}/board.env"
+          echo "soc=${ARCH}-${KERNEL_DEFCONFIG}" >> "$GITHUB_OUTPUT"
+
+      # The primary key always includes run_id so this job's own cache
+      # save never collides with a previous run's (actions/cache never
+      # overwrites an existing key) -- restore-keys' prefix match is what
+      # actually seeds a warm cache from the most recent matching run.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ steps.cachekey.outputs.soc }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ steps.cachekey.outputs.soc }}-
+
+      - name: Build
+        run: |
+          set -e
+          args="TARGET=${{ matrix.target }}"
+          [ -n "${{ inputs.kernel_version }}" ] && args="$args KERNEL_VERSION=${{ inputs.kernel_version }}"
+          [ -n "${{ inputs.alpine_version }}" ] && args="$args ALPINE_VERSION=${{ inputs.alpine_version }}"
+          [ -n "${{ inputs.custom_profile }}" ] && args="$args CUSTOM_PROFILE=${{ inputs.custom_profile }}"
+          make build $args
+
+      # Workflow artifacts only -- not yet published to Releases. §9's
+      # signed-tarball upgrade story is a separate, not-yet-implemented
+      # piece; this is just "get the image off the runner."
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-${{ inputs.custom_profile || 'base' }}
+          path: output/${{ matrix.target }}/**/alpine.img
+          if-no-files-found: error

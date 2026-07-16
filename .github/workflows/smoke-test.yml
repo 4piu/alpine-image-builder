@@ -1,0 +1,75 @@
+name: Smoke test
+
+# Validates that every target/*/ in this repo still builds -- stock
+# config only, no CUSTOM_PROFILE -- as upstream defconfigs/DTs move.
+# Independent of anyone's personal profiles (§2). CI's job here is "does
+# it compile," nothing more -- no boot-testing, no hardware in the loop
+# (notes/build-pipeline-brainstorm.md, Open questions: "board-support
+# boundary").
+on:
+  pull_request:
+    paths:
+      - "target/*/board.env"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: list
+        run: |
+          set -e
+          targets=$(for d in target/*/; do
+            name="$(basename "$d")"
+            [ -f "target/$name/board.env" ] && printf '%s\n' "$name"
+          done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.discover.outputs.targets) }}
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi binutils-arm-none-eabi \
+            device-tree-compiler u-boot-tools zstd \
+            kpartx swig python3-setuptools python3-pyelftools ccache
+
+      - name: Wire up ccache for the cross-compiler
+        run: |
+          dir="/usr/lib/ccache-cross"
+          sudo mkdir -p "$dir"
+          sudo ln -sf "$(command -v ccache)" "$dir/arm-none-eabi-gcc"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Determine cache key
+        id: cachekey
+        run: |
+          . "target/${{ matrix.target }}/board.env"
+          echo "soc=${ARCH}-${KERNEL_DEFCONFIG}" >> "$GITHUB_OUTPUT"
+
+      # Shares the same key prefix as build.yml's cache, on purpose --
+      # same SoC, same benefit, regardless of which workflow warmed it.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ steps.cachekey.outputs.soc }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ steps.cachekey.outputs.soc }}-
+
+      - name: Build (stock config only)
+        run: make build TARGET=${{ matrix.target }}
