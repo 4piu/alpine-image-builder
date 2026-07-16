@@ -2,7 +2,7 @@
 
 This is the tribal-knowledge reference for anyone touching
 `target/<name>/common/kernel.config`, `target/<name>/profiles/<name>/kernel.config`,
-`menuconfig` (via `make kernel-profile`), or the on-device incremental-build
+`menuconfig` (via `make kernel-menuconfig`), or the on-device incremental-build
 escape hatch below. See `target/README.md` for the mechanics (how
 fragments merge, how to capture a delta) — this doc is about what to
 actually put in a fragment and why.

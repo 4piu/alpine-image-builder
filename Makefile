@@ -129,6 +129,11 @@ $(foreach f,$(COMMON_RECIPE_FRAGMENTS) $(PROFILE_RECIPE_FRAGMENTS),$(if $(wildca
 # similarly-built list below.
 KERNEL_CONFIG_FRAGMENTS := $(strip $(wildcard $(COMMON_DIR)/kernel.config) $(COMMON_RECIPE_FRAGMENTS) $(wildcard $(PROFILE_DIR)/kernel.config) $(PROFILE_RECIPE_FRAGMENTS))
 
+# U-Boot config: same fragment-merge idea as the kernel, minus the
+# recipes.txt tier -- tools/recipes/ is Linux driver Kconfig, not
+# U-Boot, so there's nothing to resolve here beyond the two plain files.
+UBOOT_CONFIG_FRAGMENTS := $(strip $(wildcard $(COMMON_DIR)/uboot.config) $(wildcard $(PROFILE_DIR)/uboot.config))
+
 # Kernel source patches -- applied in the same common-then-profile order,
 # must apply cleanly or the build hard-fails ("Before starting", open
 # questions). Unlike kernel.config fragments, these mutate the shared
@@ -200,6 +205,32 @@ $(shell rm -f sources/linux/.config)
 endif
 endif
 
+# Kernel config fragments don't mutate sources/linux (unlike patches) --
+# they only ever get merged into .config -- but the same "switching
+# TARGET/PROFILE can change the fragment SET, not just edit a fragment
+# already in it" problem applies: a plain mtime-based prerequisite can't
+# tell "this build wants a different (possibly smaller) fragment set
+# than whatever's currently merged into .config" from "nothing changed."
+# Same fingerprint-and-force-delete fix as the patches case above. A
+# missing marker (no build has ever recorded one, or an older tree from
+# before this check existed) counts as "unknown," not "unchanged" -- it
+# can never match a real fingerprint, including "none," so it always
+# forces one rebuild to establish a known-good baseline rather than
+# trusting a .config nothing here can vouch for.
+KERNEL_CONFIG_FINGERPRINT := $(if $(KERNEL_CONFIG_FRAGMENTS),$(shell cat $(KERNEL_CONFIG_FRAGMENTS) | sha256sum | cut -d' ' -f1),none)
+RECORDED_KERNEL_CONFIG_FINGERPRINT := $(if $(wildcard sources/.kernel-config-fingerprint),$(shell cat sources/.kernel-config-fingerprint),unknown)
+ifneq ($(RECORDED_KERNEL_CONFIG_FINGERPRINT),$(KERNEL_CONFIG_FINGERPRINT))
+$(shell rm -f sources/linux/.config)
+endif
+
+# Same fingerprint-and-force-delete fix, same reasoning, for U-Boot's
+# config fragments.
+UBOOT_CONFIG_FINGERPRINT := $(if $(UBOOT_CONFIG_FRAGMENTS),$(shell cat $(UBOOT_CONFIG_FRAGMENTS) | sha256sum | cut -d' ' -f1),none)
+RECORDED_UBOOT_CONFIG_FINGERPRINT := $(if $(wildcard sources/.uboot-config-fingerprint),$(shell cat sources/.uboot-config-fingerprint),unknown)
+ifneq ($(RECORDED_UBOOT_CONFIG_FINGERPRINT),$(UBOOT_CONFIG_FINGERPRINT))
+$(shell rm -f sources/u-boot/.config)
+endif
+
 ################################################################################
 
 # Delete a target's output if its recipe fails partway through, so a failed
@@ -262,8 +293,12 @@ sources/u-boot.ready:
 	git clone --depth 1 --branch $(UBOOT_VERSION) git://git.denx.de/u-boot.git 'sources/u-boot'
 	echo '$(UBOOT_VERSION)' > $@
 
-sources/u-boot/.config: sources/u-boot.ready
+sources/u-boot/.config: sources/u-boot.ready $(UBOOT_CONFIG_FRAGMENTS)
 	$(MAKE) -C sources/u-boot/ '$(UBOOT_BOARD_DEFCONFIG)_defconfig'
+	$(if $(UBOOT_CONFIG_FRAGMENTS),cd sources/u-boot && ./scripts/kconfig/merge_config.sh -m .config $(abspath $(UBOOT_CONFIG_FRAGMENTS)))
+	$(if $(UBOOT_CONFIG_FRAGMENTS),$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) olddefconfig)
+	$(if $(UBOOT_CONFIG_FRAGMENTS),./verify-config.sh sources/u-boot/.config $(UBOOT_CONFIG_FRAGMENTS))
+	@mkdir -p sources && echo '$(UBOOT_CONFIG_FINGERPRINT)' > sources/.uboot-config-fingerprint
 
 sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME): sources/u-boot/.config
 	$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) all
@@ -286,12 +321,13 @@ sources/linux.ready:
 # explicitly instead of trusting that, since a recipe pulled in via
 # recipes.txt is exactly the kind of fragment nobody's hand-reviewing
 # symbol-by-symbol.
-sources/linux/.config: sources/linux.ready $(PATCH_FILES)
+sources/linux/.config: sources/linux.ready $(PATCH_FILES) $(KERNEL_CONFIG_FRAGMENTS)
 	./prepare-linux-tree.sh sources/linux sources/.tree-prepared $(KERNEL_DT_FILE) "$(DTS_OVERRIDE)" $(PATCH_FILES)
 	$(MAKE) -C sources/linux/ '$(KERNEL_DEFCONFIG)_defconfig'
 	$(if $(KERNEL_CONFIG_FRAGMENTS),cd sources/linux && ./scripts/kconfig/merge_config.sh -m .config $(abspath $(KERNEL_CONFIG_FRAGMENTS)))
 	$(if $(KERNEL_CONFIG_FRAGMENTS),$(MAKE) -C sources/linux/ $(MAKEFLAGS) olddefconfig)
-	$(if $(KERNEL_CONFIG_FRAGMENTS),./verify-kernel-config.sh sources/linux/.config $(KERNEL_CONFIG_FRAGMENTS))
+	$(if $(KERNEL_CONFIG_FRAGMENTS),./verify-config.sh sources/linux/.config $(KERNEL_CONFIG_FRAGMENTS))
+	@mkdir -p sources && echo '$(KERNEL_CONFIG_FINGERPRINT)' > sources/.kernel-config-fingerprint
 
 $(KERNEL_PRODUCTS) &: sources/linux/.config
 	$(MAKE) -C sources/linux/ $(MAKEFLAGS) zImage dtbs
@@ -299,14 +335,24 @@ $(KERNEL_PRODUCTS) &: sources/linux/.config
 $(KERNEL_PRODUCTS_OUTPUT) &: $(KERNEL_PRODUCTS) | $(OUTPUT_DIR)/
 	cp $^ $(OUTPUT_DIR)/
 
-.PHONY: kernel-profile
-kernel-profile: sources/linux/.config
-	@if [ -z "$(CUSTOM_PROFILE)" ]; then \
-		echo "CUSTOM_PROFILE is required -- e.g. make kernel-profile TARGET=$(TARGET) CUSTOM_PROFILE=add-wifi-drivers" >&2; \
-		exit 1; \
-	fi
-	mkdir -p $(PROFILE_DIR)
-	./kernel-profile.sh sources/linux $(PROFILE_DIR)/kernel.config
+# PROFILE is optional here, unlike everywhere else it's used: with it,
+# captures into that profile's kernel.config/uboot.config; without it,
+# captures into this target's common/ copy instead of some third
+# "discard" mode -- menuconfig's own exit prompt ("save your
+# configuration?") is already the point where you choose to keep or
+# throw away a session, so a separate view-only mode here would just be
+# a second, redundant way to say the same thing. See menuconfig.sh.
+MENUCONFIG_TARGET := $(if $(PROFILE),$(PROFILE_DIR),$(COMMON_DIR))
+
+.PHONY: kernel-menuconfig
+kernel-menuconfig: sources/linux/.config
+	@mkdir -p "$(MENUCONFIG_TARGET)"
+	./menuconfig.sh sources/linux "$(MENUCONFIG_TARGET)/kernel.config"
+
+.PHONY: uboot-menuconfig
+uboot-menuconfig: sources/u-boot/.config
+	@mkdir -p "$(MENUCONFIG_TARGET)"
+	./menuconfig.sh sources/u-boot "$(MENUCONFIG_TARGET)/uboot.config"
 
 # Alpine rootfs
 sources/apk-tools/apk:
@@ -351,7 +397,7 @@ clean:
 distclean: clean
 	if [ -d sources/u-boot/ ]; then $(MAKE) -C sources/u-boot/ clean; fi
 	if [ -d sources/linux/ ]; then $(MAKE) -C sources/linux/ clean; fi
-	rm -rf sources/apk-tools sources/u-boot.ready sources/linux.ready sources/.tree-prepared sources/.board-fallback.mk
+	rm -rf sources/apk-tools sources/u-boot.ready sources/linux.ready sources/.tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
 
 .PHONY: check-tools
 check-tools:

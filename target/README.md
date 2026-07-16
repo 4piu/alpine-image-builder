@@ -10,6 +10,7 @@ target/<name>/
   board.env              # which board this target builds
   common/                 # applied to every build of this target
     kernel.config
+    uboot.config
     recipes.txt            # tools/recipes/<name> to merge in, one per line
     boot.cmd
     overlays/*.dts
@@ -19,6 +20,7 @@ target/<name>/
     setup.sh               # runs once, after first-boot rootfs expansion
   profiles/<profile-name>/  # named, opt-in customization sets
     kernel.config
+    uboot.config
     recipes.txt
     boot.cmd
     overlays/*.dts
@@ -41,12 +43,13 @@ an RTL8821CU USB dongle — worth a look as a working example before
 writing your own.
 
 Every artifact resolves the same way, board manifest → `common/` →
-`profiles/$(CUSTOM_PROFILE)/`, but *how* each stage combines differs by
+`profiles/$(PROFILE)/`, but *how* each stage combines differs by
 kind:
 
 | Artifact | `common/` + `profiles/<name>/` | Both present? |
 | --- | --- | --- |
 | `kernel.config` | fragments, merged via `merge_config.sh` | both apply, profile's wins on conflict |
+| `uboot.config` | fragments, merged via `merge_config.sh` (same idea, U-Boot's own copy of the script) | both apply, profile's wins on conflict |
 | `recipes.txt` | resolved to `tools/recipes/<name>.config`, merged alongside this tier's `kernel.config` | both apply, profile's wins on conflict |
 | `patches/*.patch` | applied in order | both apply, common's first |
 | `overlays/*.dts` | compiled and loaded independently | both apply (accumulate) |
@@ -140,27 +143,61 @@ Full merge order for a single build:
 listed) → `profiles/<name>/kernel.config` → `profiles/<name>/recipes.txt`'s
 recipes (in the order listed).
 
-### Capturing a kernel config change
+### `make kernel-menuconfig` / `make uboot-menuconfig`: create, modify, or just view config
 
 Don't hand-edit a fragment against 150k lines of `.config`. Use
-`menuconfig` and let tooling capture just the delta:
+`menuconfig` and let tooling capture just the delta — same mechanism for
+both the kernel and U-Boot, just pointed at a different tree and a
+different output filename:
 
 ```
-make kernel-profile TARGET=<name> CUSTOM_PROFILE=<profile-name>
+make kernel-menuconfig TARGET=<name>                        # captures into common/kernel.config
+make kernel-menuconfig TARGET=<name> PROFILE=<profile-name>  # captures into that profile's kernel.config
+make uboot-menuconfig TARGET=<name>                          # captures into common/uboot.config
+make uboot-menuconfig TARGET=<name> PROFILE=<profile-name>   # captures into that profile's uboot.config
 ```
 
-This opens `menuconfig` against the target's currently-resolved config,
-then compares a `savedefconfig` snapshot from before and after the
-session and writes only the new/changed lines to
-`target/<name>/profiles/<profile-name>/kernel.config`. `CUSTOM_PROFILE`
-is required — there's no way to name an anonymous capture.
+This opens `menuconfig` against the target's currently-resolved config
+(base defconfig plus whatever `common/`/the named profile already
+contribute), then compares a `savedefconfig` snapshot from before and
+after the session and captures the delta into the corresponding
+`kernel.config`/`uboot.config` — creating it if it doesn't exist yet,
+*appending* to it if it does, so an earlier capture in the same file
+isn't lost.
 
-**Known limitation:** this only captures additions/changes. An option
-you explicitly turn *off* that a lower layer (the board defconfig, or
-`common/`) turned on isn't represented as a removal — add a
-`# CONFIG_X is not set` line to the resulting fragment by hand if you
-need that. Review the captured fragment before committing either way;
-`menuconfig` sessions can pull in more than you meant to change.
+**Just want to look, not change anything?** `menuconfig` itself asks
+"save your new configuration?" when you exit — answer no and nothing
+changes, so nothing gets captured either (the delta is empty). That
+prompt is the actual view/save decision point; there's no separate
+"preview" mode here on top of it.
+
+**Known limitation:** the captured delta only contains additions/changes.
+An option you explicitly turn *off* that a lower layer (the board
+defconfig, `common/`, or an earlier capture) turned on isn't represented
+as a removal — add a `# CONFIG_X is not set` line to the resulting
+fragment by hand if you need that. Review the captured fragment before
+committing either way; `menuconfig` sessions can pull in more than you
+meant to change.
+
+## U-Boot config: `uboot.config`
+
+Same idea as kernel config, minus the `recipes.txt` tier (that's Linux
+driver Kconfig, not U-Boot): `common/uboot.config` and
+`profiles/<name>/uboot.config` are fragments merged onto the board's
+stock `UBOOT_BOARD_DEFCONFIG` via U-Boot's own copy of
+`scripts/kconfig/merge_config.sh` (common's first, profile's wins on
+conflict), then `olddefconfig` resolves the rest. Empty target builds
+with the completely stock defconfig, same as kernel config.
+
+Reasons you might actually need this even for an already-supported
+board: tuning `CONFIG_DRAM_CLK`/DRAM timing for a board revision or
+stability issue, trimming unrelated features to stay under SPL's size
+budget after adding something else, or changing boot behavior
+(`bootdelay`, boot-device priority, a recovery USB/network boot path,
+a watchdog kick before Linux takes over).
+
+**The build verifies every requested symbol actually took effect here
+too**, same reasoning and same mechanism as `kernel.config` above.
 
 ## Kernel patches: `patches/*.patch`
 
@@ -170,7 +207,7 @@ fails the build outright, not a warning.** Write them in `git diff`/`git
 format-patch` format (they're applied with `git apply` against a real
 git checkout).
 
-Switching `TARGET`/`CUSTOM_PROFILE` between builds resets the shared
+Switching `TARGET`/`PROFILE` between builds resets the shared
 kernel source tree to pristine and reapplies patches from scratch —
 handled automatically, nothing to do on your end beyond writing patches
 that apply cleanly against the `KERNEL_VERSION` this target builds.
