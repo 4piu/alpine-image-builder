@@ -88,6 +88,19 @@ shell scripts that need it. Fields:
   kernel image format and U-Boot boot command (`zImage`/`bootz` for
   `arm`, `Image`/`booti` for `arm64`) -- see `KERNEL_IMAGE_FILE`/
   `BOOT_CMD_NAME` near the top of the Makefile if adding a third `ARCH`.
+- `ATF_PLAT`, `ATF_VERSION` — **optional**, both or neither. Boards with
+  an EL3 firmware stage (ARM Trusted Firmware, "ATF"/"TF-A") need a
+  `bl31.bin` built and handed to U-Boot via `BL31=`; boards without one
+  (every H3 target so far) leave both unset and none of this applies.
+  `ATF_PLAT` is upstream `trusted-firmware-a`'s platform name for the
+  SoC (check `plat/allwinner/` at the pinned `ATF_VERSION` tag -- e.g.
+  `sun50i_h616` covers H616/H618, `sun50i_h6` covers H6, `sun50i_a64`
+  covers A64/H5). Whether a board needs this at all is a property of the
+  SoC, not something to guess: check U-Boot's own
+  `arch/arm/mach-sunxi/Kconfig` for `SUNXI_BL31_BASE`'s default under
+  that board's `MACH_SUN50I_*` -- zero means no ATF, non-zero means it's
+  required and the build will fail deep inside U-Boot's `binman` step
+  without it.
 
 Resolved per field — command-line/`workflow_dispatch` overrides win
 first, then this file, then (if this file sets `BOARD=<other-target>`)

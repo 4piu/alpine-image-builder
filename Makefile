@@ -62,6 +62,17 @@ REQUIRED_BOARD_FIELDS := UBOOT_BOARD_DEFCONFIG KERNEL_DT_FILE ARCH CROSS_COMPILE
                           KERNEL_VERSION UBOOT_VERSION ALPINE_VERSION
 $(foreach f,$(REQUIRED_BOARD_FIELDS),$(if $($(f)),,$(error $(MK_RED)target/$(TARGET)/board.env (via BOARD=$(BOARD) if set) leaves $(f) unresolved -- see target/README.md$(MK_NC))))
 
+# ATF_PLAT/ATF_VERSION are optional -- most boards (anything without a
+# secure-monitor/EL3 firmware stage, e.g. every H3 target so far) need
+# neither. But a board that sets one has to set both: PLAT without a
+# pinned VERSION would build against whatever sources/atf happens to
+# already be checked out for (or fail outright on a fresh clone).
+ifneq ($(ATF_PLAT),)
+ifeq ($(ATF_VERSION),)
+$(error $(MK_RED)target/$(TARGET)/board.env sets ATF_PLAT=$(ATF_PLAT) but not ATF_VERSION -- see target/README.md$(MK_NC))
+endif
+endif
+
 # Both the kernel and U-Boot build systems read these from the environment.
 export ARCH
 export CROSS_COMPILE
@@ -72,6 +83,14 @@ export CROSS_COMPILE
 
 UBOOT_FORMAT_CUSTOM_NAME ?= u-boot-sunxi-with-spl.bin
 ROOTFS_URL = https://dl-cdn.alpinelinux.org/alpine/$(ALPINE_VERSION)
+
+# Where ATF's build puts bl31.bin for a given PLAT -- only meaningful
+# when ATF_PLAT is set (empty ATF_PLAT means this board has no EL3
+# firmware stage at all, see board.env's REQUIRED_BOARD_FIELDS check
+# above). Release build (no DEBUG=1): this is a real image-building
+# pipeline, not a development/debug workflow, and TF-A's own docs note
+# debug builds can push image size over the SPL/FIT budget.
+ATF_BL31 := $(if $(ATF_PLAT),sources/atf/build/$(ATF_PLAT)/release/bl31.bin)
 
 # Per-ARCH kernel image/boot mechanics -- arm's zImage+bootz and arm64's
 # Image+booti aren't interchangeable, and arm64 doesn't build to
@@ -207,6 +226,12 @@ ifneq ($(wildcard sources/u-boot.ready),)
 UBOOT_READY_VERSION := $(shell cat sources/u-boot.ready)
 ifneq ($(UBOOT_READY_VERSION),$(UBOOT_VERSION))
 $(error $(MK_RED)sources/u-boot was checked out for U-Boot $(UBOOT_READY_VERSION), but TARGET=$(TARGET) wants $(UBOOT_VERSION) -- run 'make distclean' (or remove sources/u-boot and sources/u-boot.ready) and rebuild$(MK_NC))
+endif
+endif
+ifneq ($(wildcard sources/atf.ready),)
+ATF_READY_VERSION := $(shell cat sources/atf.ready)
+ifneq ($(ATF_READY_VERSION),$(ATF_VERSION))
+$(error $(MK_RED)sources/atf was checked out for ATF $(ATF_READY_VERSION), but TARGET=$(TARGET) wants $(if $(ATF_VERSION),$(ATF_VERSION),"none -- this board doesn't use ATF") -- run 'make distclean' (or remove sources/atf and sources/atf.ready) and rebuild$(MK_NC))
 endif
 endif
 
@@ -355,8 +380,21 @@ sources/u-boot/.config: sources/u-boot.ready $(UBOOT_CONFIG_FRAGMENTS)
 	$(if $(UBOOT_CONFIG_FRAGMENTS),./verify-config.sh sources/u-boot/.config $(UBOOT_CONFIG_FRAGMENTS))
 	@mkdir -p sources && echo '$(UBOOT_CONFIG_FINGERPRINT)' > sources/.uboot-config-fingerprint
 
-sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME): sources/u-boot/.config
-	$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) KCFLAGS=-fdiagnostics-color=always all
+# ARM Trusted Firmware -- only cloned/built when a board's ATF_PLAT says
+# it actually needs a BL31 (H616/H618 and similar; H3 has no EL3 firmware
+# stage and never reaches any of this, since $(ATF_PLAT) is empty and
+# every rule below is conditional on it).
+ifneq ($(ATF_PLAT),)
+sources/atf.ready:
+	git clone --depth 1 --branch $(ATF_VERSION) https://github.com/TrustedFirmware-A/trusted-firmware-a.git 'sources/atf'
+	echo '$(ATF_VERSION)' > $@
+
+$(ATF_BL31): sources/atf.ready
+	$(MAKE) -C sources/atf/ $(MAKEFLAGS) PLAT=$(ATF_PLAT) CROSS_COMPILE=$(CROSS_COMPILE) bl31
+endif
+
+sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME): sources/u-boot/.config $(ATF_BL31)
+	$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) KCFLAGS=-fdiagnostics-color=always $(if $(ATF_BL31),BL31=$(abspath $(ATF_BL31))) all
 
 $(OUTPUT_DIR)/$(UBOOT_FORMAT_CUSTOM_NAME): sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME) | $(OUTPUT_DIR)/
 	cp $< $@
@@ -452,7 +490,7 @@ clean:
 distclean: clean
 	if [ -d sources/u-boot/ ]; then $(MAKE) -C sources/u-boot/ clean; fi
 	if [ -d sources/linux/ ]; then $(MAKE) -C sources/linux/ clean; fi
-	rm -rf sources/apk-tools sources/u-boot.ready sources/linux.ready sources/.tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
+	rm -rf sources/apk-tools sources/u-boot.ready sources/linux.ready sources/atf sources/atf.ready sources/.tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
 
 .PHONY: check-tools
 check-tools:
