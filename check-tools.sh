@@ -5,6 +5,8 @@
 
 set -euo pipefail
 
+source "$(dirname "$0")/colors.sh"
+
 CROSS_COMPILE_PREFIX="${CROSS_COMPILE:-arm-none-eabi-}"
 CROSS_COMPILER="${CROSS_COMPILE_PREFIX}gcc"
 # First hyphen-separated component of the prefix (arm-none-eabi- -> arm,
@@ -90,18 +92,18 @@ echo
 echo "=== Tool Check Results ==="
 
 if [ ${#found_tools[@]} -gt 0 ]; then
-    echo "✓ Found tools (${#found_tools[@]}):"
+    echo "${CCgreen}✓ Found tools (${#found_tools[@]}):${CCend}"
     printf "  %s\n" "${found_tools[@]}"
 fi
 
 if [ ${#missing_tools[@]} -gt 0 ]; then
     echo
-    echo "✗ Missing tools (${#missing_tools[@]}):"
-    printf "  %s\n" "${missing_tools[@]}"
+    echo "${CCred}${CCbold}✗ Missing tools (${#missing_tools[@]}):${CCend}"
+    printf "  ${CCred}%s${CCend}\n" "${missing_tools[@]}"
     echo
-    echo "Please install the missing tools before proceeding with the build."
+    echo "${CCred}${CCbold}Please install the missing tools before proceeding with the build.${CCend}"
     exit 1
 fi
 
 echo
-echo "✓ All required tools are available. Ready to proceed with build!"
+echo "${CCgreen}✓ All required tools are available. Ready to proceed with build!${CCend}"

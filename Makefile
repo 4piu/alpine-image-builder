@@ -13,12 +13,20 @@ TARGET ?=
 PROFILE ?=
 BOARD ?=
 
+# Raw ANSI codes so $(error ...)/$(warning ...) -- which Make just prints
+# verbatim, no coloring of its own -- stand out from the rest of the
+# build's (mostly uncolored) output instead of blending in as just
+# another line.
+MK_RED := $(shell printf '\033[0;31m')
+MK_YELLOW := $(shell printf '\033[0;33m')
+MK_NC := $(shell printf '\033[0m')
+
 ifeq ($(TARGET),)
-$(error TARGET is required, e.g. make build TARGET=nanopi-neo — see target/README.md)
+$(error $(MK_RED)TARGET is required, e.g. make build TARGET=nanopi-neo — see target/README.md$(MK_NC))
 endif
 
 ifeq ($(wildcard target/$(TARGET)/board.env),)
-$(error No target/$(TARGET)/board.env -- is TARGET=$(TARGET) spelled correctly? see target/ for available targets)
+$(error $(MK_RED)No target/$(TARGET)/board.env -- is TARGET=$(TARGET) spelled correctly? see target/ for available targets$(MK_NC))
 endif
 
 # This target's own board.env: plain assignments, so anything it sets here
@@ -37,7 +45,7 @@ endif
 # starting" #4).
 ifneq ($(BOARD),)
 ifeq ($(wildcard target/$(BOARD)/board.env),)
-$(error target/$(TARGET)/board.env references BOARD=$(BOARD), but target/$(BOARD)/board.env doesn't exist)
+$(error $(MK_RED)target/$(TARGET)/board.env references BOARD=$(BOARD), but target/$(BOARD)/board.env doesn't exist$(MK_NC))
 endif
 # $(shell) collapses the file's newlines into spaces before $(eval) ever
 # sees it, which would flatten the whole rewritten file into a single line
@@ -52,7 +60,7 @@ endif
 REQUIRED_BOARD_FIELDS := UBOOT_BOARD_DEFCONFIG KERNEL_DT_FILE ARCH CROSS_COMPILE \
                           ALPINE_ARCH KERNEL_DEFCONFIG UBOOT_WRITE_OFFSET \
                           KERNEL_VERSION UBOOT_VERSION ALPINE_VERSION
-$(foreach f,$(REQUIRED_BOARD_FIELDS),$(if $($(f)),,$(error target/$(TARGET)/board.env (via BOARD=$(BOARD) if set) leaves $(f) unresolved -- see target/README.md)))
+$(foreach f,$(REQUIRED_BOARD_FIELDS),$(if $($(f)),,$(error $(MK_RED)target/$(TARGET)/board.env (via BOARD=$(BOARD) if set) leaves $(f) unresolved -- see target/README.md$(MK_NC))))
 
 # Both the kernel and U-Boot build systems read these from the environment.
 export ARCH
@@ -79,7 +87,7 @@ KERNEL_IMAGE_FILE := Image
 BOOT_CMD_NAME := booti
 MKIMAGE_ARCH := arm64
 else
-$(error ARCH=$(ARCH) has no KERNEL_IMAGE_FILE/BOOT_CMD_NAME/MKIMAGE_ARCH mapping -- add one above)
+$(error $(MK_RED)ARCH=$(ARCH) has no KERNEL_IMAGE_FILE/BOOT_CMD_NAME/MKIMAGE_ARCH mapping -- add one above$(MK_NC))
 endif
 
 TARGET_DIR := target/$(TARGET)
@@ -132,7 +140,7 @@ PROFILE_RECIPE_FRAGMENTS := $(foreach r,$(PROFILE_RECIPE_NAMES),tools/recipes/$(
 # recipes.txt names something that doesn't exist under tools/recipes/,
 # rather than letting merge_config.sh silently skip a fragment file it
 # can't find.
-$(foreach f,$(COMMON_RECIPE_FRAGMENTS) $(PROFILE_RECIPE_FRAGMENTS),$(if $(wildcard $(f)),,$(error $(f) not found -- listed in a recipes.txt but no such recipe exists under tools/recipes/. Available: $(patsubst tools/recipes/%.config,%,$(wildcard tools/recipes/*.config)))))
+$(foreach f,$(COMMON_RECIPE_FRAGMENTS) $(PROFILE_RECIPE_FRAGMENTS),$(if $(wildcard $(f)),,$(error $(MK_RED)$(f) not found -- listed in a recipes.txt but no such recipe exists under tools/recipes/. Available: $(patsubst tools/recipes/%.config,%,$(wildcard tools/recipes/*.config))$(MK_NC))))
 
 # Kernel config: fragments merged onto the stock base defconfig via
 # merge_config.sh, common/ first (kernel.config then its recipes.txt) so
@@ -192,13 +200,13 @@ SETUP_SCRIPTS := $(strip $(wildcard $(COMMON_DIR)/setup.sh) $(wildcard $(PROFILE
 ifneq ($(wildcard sources/linux.ready),)
 LINUX_READY_VERSION := $(shell cat sources/linux.ready)
 ifneq ($(LINUX_READY_VERSION),$(KERNEL_VERSION))
-$(error sources/linux was checked out for kernel $(LINUX_READY_VERSION), but TARGET=$(TARGET) wants $(KERNEL_VERSION) -- run 'make distclean' (or remove sources/linux and sources/linux.ready) and rebuild)
+$(error $(MK_RED)sources/linux was checked out for kernel $(LINUX_READY_VERSION), but TARGET=$(TARGET) wants $(KERNEL_VERSION) -- run 'make distclean' (or remove sources/linux and sources/linux.ready) and rebuild$(MK_NC))
 endif
 endif
 ifneq ($(wildcard sources/u-boot.ready),)
 UBOOT_READY_VERSION := $(shell cat sources/u-boot.ready)
 ifneq ($(UBOOT_READY_VERSION),$(UBOOT_VERSION))
-$(error sources/u-boot was checked out for U-Boot $(UBOOT_READY_VERSION), but TARGET=$(TARGET) wants $(UBOOT_VERSION) -- run 'make distclean' (or remove sources/u-boot and sources/u-boot.ready) and rebuild)
+$(error $(MK_RED)sources/u-boot was checked out for U-Boot $(UBOOT_READY_VERSION), but TARGET=$(TARGET) wants $(UBOOT_VERSION) -- run 'make distclean' (or remove sources/u-boot and sources/u-boot.ready) and rebuild$(MK_NC))
 endif
 endif
 
@@ -215,7 +223,7 @@ endif
 ifneq ($(wildcard sources/linux/.git),)
 PREPARE_LINUX_TREE_RESULT := $(shell ./prepare-linux-tree.sh sources/linux sources/.tree-prepared $(KERNEL_DT_FILE) "$(DTS_OVERRIDE)" $(PATCH_FILES))
 ifneq ($(.SHELLSTATUS),0)
-$(error Preparing sources/linux for TARGET=$(TARGET) PROFILE=$(PROFILE) failed -- see output above)
+$(error $(MK_RED)Preparing sources/linux for TARGET=$(TARGET) PROFILE=$(PROFILE) failed -- see output above$(MK_NC))
 endif
 ifeq ($(PREPARE_LINUX_TREE_RESULT),CHANGED)
 $(shell rm -f sources/linux/.config)
@@ -329,7 +337,7 @@ sources/u-boot/.config: sources/u-boot.ready $(UBOOT_CONFIG_FRAGMENTS)
 	@mkdir -p sources && echo '$(UBOOT_CONFIG_FINGERPRINT)' > sources/.uboot-config-fingerprint
 
 sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME): sources/u-boot/.config
-	$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) all
+	$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) KCFLAGS=-fdiagnostics-color=always all
 
 $(OUTPUT_DIR)/$(UBOOT_FORMAT_CUSTOM_NAME): sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME) | $(OUTPUT_DIR)/
 	cp $< $@
@@ -358,7 +366,7 @@ sources/linux/.config: sources/linux.ready $(PATCH_FILES) $(KERNEL_CONFIG_FRAGME
 	@mkdir -p sources && echo '$(KERNEL_CONFIG_FINGERPRINT)' > sources/.kernel-config-fingerprint
 
 $(KERNEL_PRODUCTS) &: sources/linux/.config
-	$(MAKE) -C sources/linux/ $(MAKEFLAGS) $(KERNEL_IMAGE_FILE) dtbs
+	$(MAKE) -C sources/linux/ $(MAKEFLAGS) KCFLAGS=-fdiagnostics-color=always $(KERNEL_IMAGE_FILE) dtbs
 
 $(KERNEL_PRODUCTS_OUTPUT) &: $(KERNEL_PRODUCTS) | $(OUTPUT_DIR)/
 	cp $^ $(OUTPUT_DIR)/
@@ -395,7 +403,7 @@ $(ROOTFS_DIR): sources/apk-tools/apk $(PACKAGES_FILE) $(SETUP_SCRIPTS)
 
 # Build and install kernel modules to rootfs
 $(ROOTFS_DIR)/lib/modules: $(ROOTFS_DIR) $(KERNEL_PRODUCTS)
-	$(MAKE) -C sources/linux/ $(MAKEFLAGS) modules
+	$(MAKE) -C sources/linux/ $(MAKEFLAGS) KCFLAGS=-fdiagnostics-color=always modules
 	sudo $(MAKE) -C sources/linux/ $(MAKEFLAGS) INSTALL_MOD_PATH=$(abspath $(ROOTFS_DIR)) modules_install
 
 $(ROOTFS_TARBALL): $(ROOTFS_DIR)/lib/modules | $(OUTPUT_DIR)/

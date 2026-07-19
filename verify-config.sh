@@ -13,6 +13,8 @@
 
 set -euo pipefail
 
+source "$(dirname "$0")/colors.sh"
+
 config_file="$1"; shift
 
 # symbol name -> the last fragment line that requested it. Built up in
@@ -50,8 +52,8 @@ for symbol in "${!wanted[@]}"; do
 done
 
 if [ ${#mismatches[@]} -gt 0 ]; then
-    echo "ERROR: the following requested config values did not stick in $config_file" >&2
-    echo "(unmet dependency, or the symbol doesn't exist in this version):" >&2
-    printf '  %s\n' "${mismatches[@]}" | sort >&2
+    echo_err "${CCred}${CCbold}ERROR: the following requested config values did not stick in $config_file${CCend}"
+    echo_err "${CCred}(unmet dependency, or the symbol doesn't exist in this version):${CCend}"
+    printf "  ${CCred}%s${CCend}\n" "${mismatches[@]}" | sort >&2
     exit 1
 fi

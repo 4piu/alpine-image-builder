@@ -16,6 +16,8 @@
 
 set -euo pipefail
 
+source "$(dirname "$0")/colors.sh"
+
 linux_dir="$1"; shift
 marker_file="$1"; shift
 kernel_dt_file="$1"; shift
@@ -90,7 +92,7 @@ fi
 for p in "${abs_patches[@]}"; do
     echo "prepare-linux-tree: applying $p" >&2
     if ! git -C "$linux_dir" apply --whitespace=fix "$p"; then
-        echo "ERROR: $p did not apply cleanly against $linux_dir -- fix the patch (or the target/profile it lives under) and rebuild" >&2
+        echo_err "${CCred}${CCbold}ERROR: $p did not apply cleanly against $linux_dir -- fix the patch (or the target/profile it lives under) and rebuild${CCend}"
         exit 1
     fi
 done
