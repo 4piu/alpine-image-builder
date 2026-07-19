@@ -3,5 +3,6 @@ name = "alpine-image-builder"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "pyelftools>=0.33",
     "setuptools>=83.0.0",
 ]
