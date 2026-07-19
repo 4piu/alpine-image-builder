@@ -302,13 +302,20 @@ custom `boot.cmd` still works across architectures without hand-picking
 either if you write your own. Same override precedence as `dts/*.dts`:
 profile's wins over common's wins over the shipped default.
 
-The *substitution mechanism* is architecture-agnostic, but the shipped
-`boot.cmd.template` itself isn't fully platform-neutral yet — it assumes
-booting from `mmc 0:1` and hardcodes load addresses that happen to work
-for every board in this repo so far (all Allwinner sunxi, all with DRAM
-based at the same address). A board that boots from a different device,
-or whose platform maps DRAM somewhere else, needs its own `boot.cmd`
-(`common/boot.cmd`) rather than relying on the shipped default.
+Kernel/DTB/overlay load addresses in the shipped template are
+`${kernel_addr_r}`/`${fdt_addr_r}`/`${fdtoverlay_addr_r}` — U-Boot's own
+per-board environment defaults, not hardcoded values — so they're
+already sized correctly for whatever this board's own U-Boot port
+considers safe (arm64's `Image` is uncompressed and can be tens of MB;
+a board with less DRAM needs everything packed tighter). Don't
+hardcode literal addresses in a custom `boot.cmd` — a large enough
+kernel silently overwriting a DTB loaded too close to it in memory is a
+real failure mode this project has already hit once, not a
+hypothetical.
+
+The one thing still assumed by the shipped template is booting from
+`mmc 0:1` — a board that boots from a different device needs its own
+`boot.cmd` (`common/boot.cmd`) rather than relying on the default.
 
 ## `packages.txt`
 

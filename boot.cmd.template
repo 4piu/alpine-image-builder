@@ -1,8 +1,19 @@
 setenv bootargs earlyprintk console=ttyS0,115200 root=/dev/mmcblk0p1 rw noinitrd rootwait
 
+# Load addresses come from U-Boot's own per-board/per-arch environment
+# defaults (kernel_addr_r/fdt_addr_r/fdtoverlay_addr_r -- see
+# include/configs/sunxi-common.h's MEM_LAYOUT_ENV_SETTINGS upstream, or
+# the equivalent for a non-sunxi platform), not hardcoded here. That
+# matters beyond just portability: arm64 kernels are uncompressed and
+# can be tens of MB, and this project once hardcoded a kernel/DTB gap
+# (32MB) sized for armv7's small compressed zImage -- a big enough arm64
+# Image silently overran into the DTB it had just loaded, corrupting it
+# before boot ever got to read it. Upstream's own arm64 defaults leave a
+# 256MB gap specifically because of this; use them instead of guessing.
+
 # Load main device tree
-load mmc 0:1 0x43000000 boot/@DTB_FILE@
-fdt addr 0x43000000
+load mmc 0:1 ${fdt_addr_r} boot/@DTB_FILE@
+fdt addr ${fdt_addr_r}
 fdt resize 8192
 
 # Dynamic overlay loading (auto-generated at build time from whatever's in
@@ -11,14 +22,14 @@ setenv overlay_files ""
 
 # Load each overlay in the list
 for overlay_file in ${overlay_files}; do
-    if load mmc 0:1 0x44000000 boot/overlay/${overlay_file}; then
+    if load mmc 0:1 ${fdtoverlay_addr_r} boot/overlay/${overlay_file}; then
         echo "Loading overlay: ${overlay_file}"
-        fdt apply 0x44000000
+        fdt apply ${fdtoverlay_addr_r}
     else
         echo "Overlay not found: ${overlay_file}"
     fi
 done
 
 # Load kernel and boot
-load mmc 0:1 0x41000000 boot/@KERNEL_FILE@
-@BOOT_CMD@ 0x41000000 - 0x43000000
+load mmc 0:1 ${kernel_addr_r} boot/@KERNEL_FILE@
+@BOOT_CMD@ ${kernel_addr_r} - ${fdt_addr_r}
