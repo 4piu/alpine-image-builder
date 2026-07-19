@@ -35,12 +35,21 @@ A target with nothing under `common/`/`profiles/` builds a stock image
 `common/`/`profiles/<name>/` is optional; add only what you actually
 want to change.
 
-`zeropi` has nothing under `common/`. `nanopi-neo` carries one always-on
-overlay (`common/overlays/sun8i-h3-usbhost1.dts`) that enables its
-second USB host controller, off in the stock device tree. Both targets
-also carry a real `profiles/wifi/` — `recipes.txt` + `packages.txt` for
-an RTL8821CU USB dongle — worth a look as a working example before
-writing your own.
+### Current targets in this repo
+
+Nothing below is special-cased in the tooling — these are just examples
+worth looking at, not a description of how the system works (that's the
+rest of this doc). `zeropi` has nothing under `common/`. `nanopi-neo`
+carries one always-on overlay (`common/overlays/sun8i-h3-usbhost1.dts`)
+that enables its second USB host controller, off in the stock device
+tree. Both targets also carry a real `profiles/wifi/` — `recipes.txt` +
+`packages.txt` for an RTL8821CU USB dongle — worth a look as a working
+example before writing your own. `orangepi-zero3` is the first arm64
+target in this repo (Allwinner H618) — its `common/kernel.config`/
+`common/uboot.config` are still the empty/comment-only placeholders
+every new target starts with, and it needs `ATF_PLAT`/`ATF_VERSION` set
+in `board.env` since that SoC boots through ARM Trusted Firmware, unlike
+the other two targets here.
 
 Every artifact resolves the same way, board manifest → `common/` →
 `profiles/$(PROFILE)/`, but *how* each stage combines differs by
@@ -72,15 +81,21 @@ shell scripts that need it. Fields:
   kernel source tree (e.g. `allwinner/sun8i-h3-nanopi-neo.dtb`).
 - `KERNEL_DEFCONFIG` — the kernel's defconfig *make target, in full*
   (e.g. `sunxi_defconfig`), unlike `UBOOT_BOARD_DEFCONFIG` above. Not
-  every arch follows the `<name>_defconfig` convention the same way --
-  arm64/sunxi boards build from the one generic `arch/arm64/configs/
-  defconfig` rather than a per-board-family file, so this field has to
-  hold whatever the real target name is, not just a prefix.
+  every arch/platform follows the `<name>_defconfig` convention the same
+  way — some build from one generic per-arch `defconfig` rather than a
+  per-board-family file (arm64/Allwinner-sunxi boards currently in this
+  repo are like that: `arch/arm64/configs/defconfig`, no `sunxi_` prefix
+  to it) — so this field has to hold whatever the real target name
+  actually is, not just an assumed prefix. Check the kernel source's own
+  `arch/<ARCH>/configs/` for your SoC.
 - `UBOOT_WRITE_OFFSET` — where `make-image.sh` `dd`s the built U-Boot
   binary into the image, in 1024-byte blocks (i.e. the raw `seek=`
-  value). `8` (8 KiB) for sunxi-platform boards with SPL -- true across
-  the whole Allwinner sunxi family (H3 through H616/H618), not just one
-  chip.
+  value). This is entirely platform-specific — there's no project-wide
+  default, and getting it wrong means U-Boot doesn't start at all. Check
+  your SoC's boot-ROM/SPL documentation (or an existing working image
+  for the same platform) for the right value; every Allwinner
+  sunxi-platform board in this repo so far uses `8` (8 KiB), which is a
+  fact about that one SoC family, not a fact about this tooling.
 - `ALPINE_ARCH` — the Alpine architecture tag for this board's CPU
   (e.g. `armv7`, `aarch64`).
 - `ARCH`, `CROSS_COMPILE`, `UBOOT_VERSION` — architecture, cross-compiler
@@ -91,16 +106,21 @@ shell scripts that need it. Fields:
 - `ATF_PLAT`, `ATF_VERSION` — **optional**, both or neither. Boards with
   an EL3 firmware stage (ARM Trusted Firmware, "ATF"/"TF-A") need a
   `bl31.bin` built and handed to U-Boot via `BL31=`; boards without one
-  (every H3 target so far) leave both unset and none of this applies.
-  `ATF_PLAT` is upstream `trusted-firmware-a`'s platform name for the
-  SoC (check `plat/allwinner/` at the pinned `ATF_VERSION` tag -- e.g.
-  `sun50i_h616` covers H616/H618, `sun50i_h6` covers H6, `sun50i_a64`
-  covers A64/H5). Whether a board needs this at all is a property of the
-  SoC, not something to guess: check U-Boot's own
-  `arch/arm/mach-sunxi/Kconfig` for `SUNXI_BL31_BASE`'s default under
-  that board's `MACH_SUN50I_*` -- zero means no ATF, non-zero means it's
-  required and the build will fail deep inside U-Boot's `binman` step
-  without it.
+  leave both unset and none of this applies. `ATF_PLAT` is upstream
+  `trusted-firmware-a`'s platform name for the SoC — check `plat/` at
+  the pinned `ATF_VERSION` tag for the right one (e.g. `plat/allwinner/`
+  for Allwinner chips: `sun50i_h616` covers H616/H618, `sun50i_h6`
+  covers H6, `sun50i_a64` covers A64/H5 — a different vendor has its own
+  `plat/<vendor>/` subdirectory). Whether a board needs this at all is a
+  property of the SoC, not something to guess: U-Boot's own board
+  support code says so explicitly if you know where to look — for
+  Allwinner it's `SUNXI_BL31_BASE`'s default in
+  `arch/arm/mach-sunxi/Kconfig` under that board's `MACH_SUN50I_*` (zero
+  means no ATF, non-zero means it's required); a different vendor's
+  U-Boot port will have its own equivalent under its own
+  `arch/arm/mach-<vendor>/Kconfig`. Skipping this when it's actually
+  needed doesn't fail cleanly — it fails deep inside U-Boot's `binman`
+  step instead, so check first rather than finding out the hard way.
 
 Resolved per field — command-line/`workflow_dispatch` overrides win
 first, then this file, then (if this file sets `BOARD=<other-target>`)
@@ -215,11 +235,12 @@ conflict), then `olddefconfig` resolves the rest. Empty target builds
 with the completely stock defconfig, same as kernel config.
 
 Reasons you might actually need this even for an already-supported
-board: tuning `CONFIG_DRAM_CLK`/DRAM timing for a board revision or
-stability issue, trimming unrelated features to stay under SPL's size
-budget after adding something else, or changing boot behavior
-(`bootdelay`, boot-device priority, a recovery USB/network boot path,
-a watchdog kick before Linux takes over).
+board: tuning DRAM timing for a board revision or stability issue
+(e.g. `CONFIG_DRAM_CLK` on Allwinner sunxi boards — the equivalent
+symbol is platform-specific), trimming unrelated features to stay under
+SPL's size budget after adding something else, or changing boot
+behavior (`bootdelay`, boot-device priority, a recovery USB/network boot
+path, a watchdog kick before Linux takes over).
 
 **The build verifies every requested symbol actually took effect here
 too**, same reasoning and same mechanism as `kernel.config` above.
@@ -280,6 +301,14 @@ custom `boot.cmd` still works across architectures without hand-picking
 `zImage`/`bootz` vs `Image`/`booti` — use them instead of hardcoding
 either if you write your own. Same override precedence as `dts/*.dts`:
 profile's wins over common's wins over the shipped default.
+
+The *substitution mechanism* is architecture-agnostic, but the shipped
+`boot.cmd.template` itself isn't fully platform-neutral yet — it assumes
+booting from `mmc 0:1` and hardcodes load addresses that happen to work
+for every board in this repo so far (all Allwinner sunxi, all with DRAM
+based at the same address). A board that boots from a different device,
+or whose platform maps DRAM somewhere else, needs its own `boot.cmd`
+(`common/boot.cmd`) rather than relying on the shipped default.
 
 ## `packages.txt`
 

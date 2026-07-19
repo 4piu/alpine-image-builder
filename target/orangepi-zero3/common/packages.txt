@@ -1,0 +1,8 @@
+# Extra apk packages for this target, installed into the rootfs -- see
+# target/README.md. One per line, # comments and blank lines ignored.
+# Empty has no effect -- just the packages already pulled in by the base
+# image.
+#
+# Add lines like:
+#   htop
+#   openssh
