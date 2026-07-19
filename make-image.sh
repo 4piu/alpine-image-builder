@@ -55,14 +55,49 @@ trap 'exit 1' ERR
 create_image_file()
 {
     # Calculate size
-    margin_size=$(( 20 * 1024 * 1024 )) # 20MB margin
-    rootfs_size=$(sudo du -bs "${ROOTFS_DIR}" | awk '{print $1}')
+    #
+    # rootfs/overlay are directory trees with potentially thousands of
+    # small files -- `du -b` (apparent size, exact byte counts) undercounts
+    # what they actually cost on the target ext4 filesystem, since every
+    # file rounds up to a whole 4K block and every directory itself
+    # consumes at least one more block for its entry list. Plain `du`
+    # (no -b) reports real block-rounded disk usage instead, which tracks
+    # the target filesystem's actual block consumption far more closely.
+    # The single-file items below (kernel/dtb/bootscr/uboot) don't need
+    # this -- one large file's rounding waste is at most one block either way.
+    rootfs_size=$(sudo du -s --block-size=1 "${ROOTFS_DIR}" | awk '{print $1}')
     kernel_size=$(du -bs "${KERNEL}" | awk '{print $1}')
     dtb_size=$(du -bs "${DTB}" | awk '{print $1}')
     bootscr_size=$(du -bs "${BOOTSCR}" | awk '{print $1}')
     uboot_size=$(du -bs "${UBOOT}" | awk '{print $1}')
-    total_size=$(( rootfs_size + kernel_size + dtb_size + bootscr_size + uboot_size + margin_size ))
-    log "Creating empty image file: ${IMAGE} (${total_size}B)"
+    # Overlays are optional (DTBO_DIR may be unset or empty) but do land in
+    # /boot like everything else above -- omitting them here previously
+    # undercounted the image for any target that actually ships one.
+    overlay_size=0
+    if [ -n "${DTBO_DIR:-}" ] && [ -d "${DTBO_DIR}" ]; then
+        overlay_size=$(du -s --block-size=1 "${DTBO_DIR}" | awk '{print $1}')
+    fi
+    content_size=$(( rootfs_size + kernel_size + dtb_size + bootscr_size + uboot_size + overlay_size ))
+
+    # A flat margin doesn't track reality: ext4's own overhead (journal,
+    # inode table, block bitmaps, the reserved GDT blocks -E resize=
+    # sets aside for later online-growing) scales with filesystem size,
+    # not with a constant -- mke2fs's default journal size alone steps up
+    # in chunks as the filesystem grows (e.g. 16MB once you cross ~256K
+    # 4K-blocks, i.e. ~1GB). A fixed 20MB was already tight for a small
+    # armv7 zImage-based rootfs; arm64's much larger uncompressed Image
+    # blew straight through it. 15% of content, floored at 32MB so a
+    # small image still gets enough room for the journal alone, scales
+    # with actual content instead of guessing a single constant that's
+    # either too tight for a big image or wasteful for a small one.
+    margin_size=$(( content_size * 15 / 100 ))
+    min_margin=$(( 32 * 1024 * 1024 ))
+    if [ "$margin_size" -lt "$min_margin" ]; then
+        margin_size=$min_margin
+    fi
+
+    total_size=$(( content_size + margin_size ))
+    log "Creating empty image file: ${IMAGE} (${total_size}B content=${content_size}B margin=${margin_size}B)"
     truncate -s "${total_size}" "${IMAGE}"
     sync
 }
