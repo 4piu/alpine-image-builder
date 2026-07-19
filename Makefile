@@ -236,23 +236,36 @@ endif
 # already in it" problem applies: a plain mtime-based prerequisite can't
 # tell "this build wants a different (possibly smaller) fragment set
 # than whatever's currently merged into .config" from "nothing changed."
-# Same fingerprint-and-force-delete fix as the patches case above. A
-# missing marker (no build has ever recorded one, or an older tree from
-# before this check existed) counts as "unknown," not "unchanged" -- it
-# can never match a real fingerprint, including "none," so it always
-# forces one rebuild to establish a known-good baseline rather than
-# trusting a .config nothing here can vouch for.
-KERNEL_CONFIG_FINGERPRINT := $(if $(KERNEL_CONFIG_FRAGMENTS),$(shell cat $(KERNEL_CONFIG_FRAGMENTS) | sha256sum | cut -d' ' -f1),none)
+# Same fingerprint-and-force-delete fix as the patches case above.
+#
+# The hash covers ARCH/CROSS_COMPILE/KERNEL_DEFCONFIG *as well as*
+# fragment content, not just the fragments -- two different boards that
+# both happen to have zero kernel.config fragments (e.g. a brand new
+# target before anyone's added one) would otherwise hash identically
+# ("no fragments" == "no fragments") and this check would see no
+# difference at all, silently reusing a .config -- and everything built
+# from it, including sources/u-boot/$(UBOOT_FORMAT_CUSTOM_NAME) below --
+# for a completely different board. This is exactly how switching from
+# an armv7/H3 target straight to a fresh arm64 board slipped through:
+# both had empty fragment sets, so the old fingerprint was blind to the
+# board actually being different. `cat ... </dev/null` matters when
+# there are zero fragment files -- `cat` with no filename arguments
+# reads stdin instead of returning empty, which would otherwise hang
+# this exact `make` invocation waiting for input that's never coming.
+KERNEL_CONFIG_FINGERPRINT := $(shell (echo '$(ARCH) $(CROSS_COMPILE) $(KERNEL_DEFCONFIG)'; cat $(KERNEL_CONFIG_FRAGMENTS) </dev/null) | sha256sum | cut -d' ' -f1)
 RECORDED_KERNEL_CONFIG_FINGERPRINT := $(if $(wildcard sources/.kernel-config-fingerprint),$(shell cat sources/.kernel-config-fingerprint),unknown)
 ifneq ($(RECORDED_KERNEL_CONFIG_FINGERPRINT),$(KERNEL_CONFIG_FINGERPRINT))
+$(warning $(MK_YELLOW)Kernel config/board identity changed since sources/linux/.config was last built (different TARGET/PROFILE, or the board's ARCH/KERNEL_DEFCONFIG differs) -- discarding it and rebuilding from scratch.$(MK_NC))
 $(shell rm -f sources/linux/.config)
 endif
 
 # Same fingerprint-and-force-delete fix, same reasoning, for U-Boot's
-# config fragments.
-UBOOT_CONFIG_FINGERPRINT := $(if $(UBOOT_CONFIG_FRAGMENTS),$(shell cat $(UBOOT_CONFIG_FRAGMENTS) | sha256sum | cut -d' ' -f1),none)
+# config fragments -- UBOOT_BOARD_DEFCONFIG stands in for KERNEL_DEFCONFIG
+# here, since that's U-Boot's own board-identity field.
+UBOOT_CONFIG_FINGERPRINT := $(shell (echo '$(ARCH) $(CROSS_COMPILE) $(UBOOT_BOARD_DEFCONFIG)'; cat $(UBOOT_CONFIG_FRAGMENTS) </dev/null) | sha256sum | cut -d' ' -f1)
 RECORDED_UBOOT_CONFIG_FINGERPRINT := $(if $(wildcard sources/.uboot-config-fingerprint),$(shell cat sources/.uboot-config-fingerprint),unknown)
 ifneq ($(RECORDED_UBOOT_CONFIG_FINGERPRINT),$(UBOOT_CONFIG_FINGERPRINT))
+$(warning $(MK_YELLOW)U-Boot config/board identity changed since sources/u-boot/.config was last built (different TARGET/PROFILE, or the board's ARCH/UBOOT_BOARD_DEFCONFIG differs) -- discarding it and rebuilding from scratch.$(MK_NC))
 $(shell rm -f sources/u-boot/.config)
 endif
 
@@ -286,8 +299,14 @@ $(OUTPUT_DIR)/:
 # recursing into the real (parallelizable) build guarantees the prompt is
 # the only thing on screen when it appears. `$(MAKE)` here shares this
 # invocation's jobserver automatically, so `-j` still applies to it.
+#
+# check-tools runs first, before even asking for a password: a missing
+# cross-compiler should fail immediately with check-tools.sh's own clear
+# "install X" message, not minutes into a build as a bare "command not
+# found" buried in kernel/u-boot sub-make output.
 .PHONY: build
 build:
+	./check-tools.sh
 	@sudo -v
 	@( makepid=$$PPID; while true; do sleep 60; kill -0 $$makepid 2>/dev/null || exit; sudo -n -v; done 2>/dev/null & )
 	$(MAKE) $(MAKEFLAGS) $(IMAGE) $(ROOTFS_TARBALL)
@@ -442,6 +461,7 @@ check-tools:
 .PHONY: install
 .SILENT: install
 install:
+	./check-tools.sh
 	@sudo -v
 	@( makepid=$$PPID; while true; do sleep 60; kill -0 $$makepid 2>/dev/null || exit; sudo -n -v; done 2>/dev/null & )
 	$(MAKE) $(MAKEFLAGS) $(IMAGE)
