@@ -261,19 +261,28 @@ endif
 $(OUTPUT_DIR)/:
 	mkdir -p $@
 
-# Refresh the cached sudo credential in the background for as long as this
-# `make` invocation is alive, so a long kernel/u-boot build doesn't let the
-# ticket expire and leave modules_install/make-image.sh hanging on a password
-# prompt nobody is there to answer. $$PPID here is make's own PID (make forks
-# this recipe's shell directly), so the loop self-terminates when make exits,
-# whether it succeeds, fails, or gets interrupted.
-.PHONY: sudo-keepalive
-sudo-keepalive:
+# Prime the sudo credential, then refresh it in the background for as long
+# as this `make` invocation is alive, so a long kernel/u-boot build doesn't
+# let the ticket expire and leave modules_install/make-image.sh hanging on
+# a password prompt nobody is there to answer. $$PPID here is make's own
+# PID (make forks this recipe's shell directly), so the loop self-terminates
+# when make exits, whether it succeeds, fails, or gets interrupted.
+#
+# This has to be the first two lines of build's *own* recipe, not a
+# separate prerequisite target -- under `-j`, prerequisites run in
+# whatever order Make schedules them, so a `sudo-keepalive` prerequisite
+# can start concurrently with the kernel/u-boot compile jobs and its
+# password prompt gets buried in their output (build looks hung; it's
+# actually just waiting on stdin). Recipe lines within one target always
+# run in order regardless of `-j`, so priming here first and only then
+# recursing into the real (parallelizable) build guarantees the prompt is
+# the only thing on screen when it appears. `$(MAKE)` here shares this
+# invocation's jobserver automatically, so `-j` still applies to it.
+.PHONY: build
+build:
 	@sudo -v
 	@( makepid=$$PPID; while true; do sleep 60; kill -0 $$makepid 2>/dev/null || exit; sudo -n -v; done 2>/dev/null & )
-
-.PHONY: build
-build: sudo-keepalive $(IMAGE) $(ROOTFS_TARBALL)
+	$(MAKE) $(MAKEFLAGS) $(IMAGE) $(ROOTFS_TARBALL)
 
 # DT Overlays -- two static pattern rules, one per source directory (see
 # OVERLAY_TARGETS_COMMON/PROFILE above for why one rule can't cover both).
@@ -424,7 +433,10 @@ check-tools:
 
 .PHONY: install
 .SILENT: install
-install: sudo-keepalive $(IMAGE)
+install:
+	@sudo -v
+	@( makepid=$$PPID; while true; do sleep 60; kill -0 $$makepid 2>/dev/null || exit; sudo -n -v; done 2>/dev/null & )
+	$(MAKE) $(MAKEFLAGS) $(IMAGE)
 	sudo lsblk
 	read -p "Enter the SD card device (e.g., /dev/sdX): " DEV; \
 	if [ -z "$$DEV" ]; then echo "No device entered. Aborting."; exit 1; fi ; \
