@@ -65,6 +65,23 @@ export CROSS_COMPILE
 UBOOT_FORMAT_CUSTOM_NAME ?= u-boot-sunxi-with-spl.bin
 ROOTFS_URL = https://dl-cdn.alpinelinux.org/alpine/$(ALPINE_VERSION)
 
+# Per-ARCH kernel image/boot mechanics -- arm's zImage+bootz and arm64's
+# Image+booti aren't interchangeable, and arm64 doesn't build to
+# arch/arm/... the way arm does. Everything board.env itself provides is
+# arch-independent (defconfig names, DT paths); this is the one place
+# that has to branch on ARCH instead.
+ifeq ($(ARCH),arm)
+KERNEL_IMAGE_FILE := zImage
+BOOT_CMD_NAME := bootz
+MKIMAGE_ARCH := arm
+else ifeq ($(ARCH),arm64)
+KERNEL_IMAGE_FILE := Image
+BOOT_CMD_NAME := booti
+MKIMAGE_ARCH := arm64
+else
+$(error ARCH=$(ARCH) has no KERNEL_IMAGE_FILE/BOOT_CMD_NAME/MKIMAGE_ARCH mapping -- add one above)
+endif
+
 TARGET_DIR := target/$(TARGET)
 PROFILE_NAME := $(if $(PROFILE),$(PROFILE),base)
 PROFILE_DIR := $(TARGET_DIR)/profiles/$(PROFILE)
@@ -92,7 +109,7 @@ DTS_OVERRIDE := $(if $(DTS_OVERRIDE_PROFILE),$(DTS_OVERRIDE_PROFILE),$(DTS_OVERR
 # override file's own basename).
 EFFECTIVE_DTB_FILE := $(if $(DTS_OVERRIDE),$(dir $(KERNEL_DT_FILE))$(basename $(notdir $(DTS_OVERRIDE))).dtb,$(KERNEL_DT_FILE))
 
-KERNEL_PRODUCTS := $(addprefix sources/linux/,arch/arm/boot/zImage arch/arm/boot/dts/$(EFFECTIVE_DTB_FILE))
+KERNEL_PRODUCTS := $(addprefix sources/linux/,arch/$(ARCH)/boot/$(KERNEL_IMAGE_FILE) arch/$(ARCH)/boot/dts/$(EFFECTIVE_DTB_FILE))
 KERNEL_PRODUCTS_OUTPUT := $(addprefix $(OUTPUT_DIR)/,$(notdir $(KERNEL_PRODUCTS)))
 ROOTFS_DIR := $(OUTPUT_DIR)/rootfs
 ROOTFS_TARBALL := $(OUTPUT_DIR)/rootfs.tar.gz
@@ -285,8 +302,10 @@ $(OUTPUT_DIR)/boot.scr: $(BOOT_CMD_SOURCE) $(OVERLAY_TARGETS) | $(OUTPUT_DIR)/
 	@overlay_list=$$(for f in $(OVERLAY_TARGETS); do basename $$f; done | tr '\n' ' '); \
 	sed -e "s/setenv overlay_files \"[^\"]*\"/setenv overlay_files \"$$overlay_list\"/" \
 	    -e "s|@DTB_FILE@|$(notdir $(EFFECTIVE_DTB_FILE))|" \
+	    -e "s|@KERNEL_FILE@|$(KERNEL_IMAGE_FILE)|" \
+	    -e "s|@BOOT_CMD@|$(BOOT_CMD_NAME)|" \
 	    $(BOOT_CMD_SOURCE) > $(OUTPUT_DIR)/boot.cmd.tmp
-	mkimage -C none -A arm -T script -d $(OUTPUT_DIR)/boot.cmd.tmp '$@'
+	mkimage -C none -A $(MKIMAGE_ARCH) -T script -d $(OUTPUT_DIR)/boot.cmd.tmp '$@'
 	@rm -f $(OUTPUT_DIR)/boot.cmd.tmp
 
 sources/u-boot.ready:
@@ -323,14 +342,14 @@ sources/linux.ready:
 # symbol-by-symbol.
 sources/linux/.config: sources/linux.ready $(PATCH_FILES) $(KERNEL_CONFIG_FRAGMENTS)
 	./prepare-linux-tree.sh sources/linux sources/.tree-prepared $(KERNEL_DT_FILE) "$(DTS_OVERRIDE)" $(PATCH_FILES)
-	$(MAKE) -C sources/linux/ '$(KERNEL_DEFCONFIG)_defconfig'
+	$(MAKE) -C sources/linux/ '$(KERNEL_DEFCONFIG)'
 	$(if $(KERNEL_CONFIG_FRAGMENTS),cd sources/linux && ./scripts/kconfig/merge_config.sh -m .config $(abspath $(KERNEL_CONFIG_FRAGMENTS)))
 	$(if $(KERNEL_CONFIG_FRAGMENTS),$(MAKE) -C sources/linux/ $(MAKEFLAGS) olddefconfig)
 	$(if $(KERNEL_CONFIG_FRAGMENTS),./verify-config.sh sources/linux/.config $(KERNEL_CONFIG_FRAGMENTS))
 	@mkdir -p sources && echo '$(KERNEL_CONFIG_FINGERPRINT)' > sources/.kernel-config-fingerprint
 
 $(KERNEL_PRODUCTS) &: sources/linux/.config
-	$(MAKE) -C sources/linux/ $(MAKEFLAGS) zImage dtbs
+	$(MAKE) -C sources/linux/ $(MAKEFLAGS) $(KERNEL_IMAGE_FILE) dtbs
 
 $(KERNEL_PRODUCTS_OUTPUT) &: $(KERNEL_PRODUCTS) | $(OUTPUT_DIR)/
 	cp $^ $(OUTPUT_DIR)/

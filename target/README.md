@@ -65,17 +65,29 @@ Make-specific, so it's readable directly by both the Makefile and any
 shell scripts that need it. Fields:
 
 - `UBOOT_BOARD_DEFCONFIG` — the upstream U-Boot defconfig name for this
-  exact board (e.g. `nanopi_neo`).
+  exact board, *without* the `_defconfig` suffix, e.g. `nanopi_neo`
+  (U-Boot's own defconfigs always follow `<name>_defconfig`, so the
+  Makefile appends that automatically).
 - `KERNEL_DT_FILE` — path to the board's device tree blob under the
   kernel source tree (e.g. `allwinner/sun8i-h3-nanopi-neo.dtb`).
+- `KERNEL_DEFCONFIG` — the kernel's defconfig *make target, in full*
+  (e.g. `sunxi_defconfig`), unlike `UBOOT_BOARD_DEFCONFIG` above. Not
+  every arch follows the `<name>_defconfig` convention the same way --
+  arm64/sunxi boards build from the one generic `arch/arm64/configs/
+  defconfig` rather than a per-board-family file, so this field has to
+  hold whatever the real target name is, not just a prefix.
 - `UBOOT_WRITE_OFFSET` — where `make-image.sh` `dd`s the built U-Boot
   binary into the image, in 1024-byte blocks (i.e. the raw `seek=`
-  value). `8` (8 KiB) for sunxi/H3 boards with SPL.
+  value). `8` (8 KiB) for sunxi-platform boards with SPL -- true across
+  the whole Allwinner sunxi family (H3 through H616/H618), not just one
+  chip.
 - `ALPINE_ARCH` — the Alpine architecture tag for this board's CPU
-  (e.g. `armv7`).
-- `ARCH`, `CROSS_COMPILE`, `KERNEL_DEFCONFIG`, `UBOOT_VERSION` —
-  architecture, cross-compiler prefix, kernel defconfig name, and
-  U-Boot version for this board.
+  (e.g. `armv7`, `aarch64`).
+- `ARCH`, `CROSS_COMPILE`, `UBOOT_VERSION` — architecture, cross-compiler
+  prefix, and U-Boot version for this board. `ARCH` also selects the
+  kernel image format and U-Boot boot command (`zImage`/`bootz` for
+  `arm`, `Image`/`booti` for `arm64`) -- see `KERNEL_IMAGE_FILE`/
+  `BOOT_CMD_NAME` near the top of the Makefile if adding a third `ARCH`.
 
 Resolved per field — command-line/`workflow_dispatch` overrides win
 first, then this file, then (if this file sets `BOARD=<other-target>`)
@@ -248,10 +260,13 @@ required list — it's only needed for this optional review step).
 
 A full replacement of `boot.cmd.template` for changing actual boot
 *logic*, not just parameters — most customization needs don't need this;
-`overlays/` covers device tree changes, and `@DTB_FILE@`/the overlay list
-are substituted into whichever `boot.cmd` is active regardless of source.
-Same override precedence as `dts/*.dts`: profile's wins over common's
-wins over the shipped default.
+`overlays/` covers device tree changes, and `@DTB_FILE@`/`@KERNEL_FILE@`/
+`@BOOT_CMD@`/the overlay list are substituted into whichever `boot.cmd`
+is active regardless of source. `@KERNEL_FILE@`/`@BOOT_CMD@` exist so a
+custom `boot.cmd` still works across architectures without hand-picking
+`zImage`/`bootz` vs `Image`/`booti` — use them instead of hardcoding
+either if you write your own. Same override precedence as `dts/*.dts`:
+profile's wins over common's wins over the shipped default.
 
 ## `packages.txt`
 
