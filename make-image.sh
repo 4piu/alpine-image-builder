@@ -86,12 +86,25 @@ create_image_file()
     # in chunks as the filesystem grows (e.g. 16MB once you cross ~256K
     # 4K-blocks, i.e. ~1GB). A fixed 20MB was already tight for a small
     # armv7 zImage-based rootfs; arm64's much larger uncompressed Image
-    # blew straight through it. 15% of content, floored at 32MB so a
-    # small image still gets enough room for the journal alone, scales
+    # blew straight through it. 15% of content, floored at 48MB, scales
     # with actual content instead of guessing a single constant that's
     # either too tight for a big image or wasteful for a small one.
+    #
+    # The floor specifically has to clear ext4's *fixed* structural cost,
+    # not just "some margin" -- measured directly (mkfs a same-sized image,
+    # diff total vs. free blocks before writing anything) at exactly the
+    # ~165MB content size a wifi-profile orangepi-zero3 rootfs lands at:
+    # journal (16MB) + inode table/bitmaps/backups (~13MB) = ~29MB, before
+    # a single content byte is written. A 32MB floor left only ~3MB of
+    # itself as actual margin after that fixed cost -- not enough to
+    # absorb any real-world slop between du's block-rounded estimate and
+    # what the target ext4 filesystem actually allocates (its own
+    # directory-block layout, xattrs, etc. don't have to match the
+    # source filesystem's exactly), which is what tipped this into
+    # ENOSPC. 48MB leaves genuine headroom above the measured fixed cost
+    # instead of being consumed by it.
     margin_size=$(( content_size * 15 / 100 ))
-    min_margin=$(( 32 * 1024 * 1024 ))
+    min_margin=$(( 48 * 1024 * 1024 ))
     if [ "$margin_size" -lt "$min_margin" ]; then
         margin_size=$min_margin
     fi
