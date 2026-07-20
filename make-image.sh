@@ -93,7 +93,7 @@ create_image_file()
     # The floor specifically has to clear ext4's *fixed* structural cost,
     # not just "some margin" -- measured directly (mkfs a same-sized image,
     # diff total vs. free blocks before writing anything) at exactly the
-    # ~165MB content size a wifi-profile orangepi-zero3 rootfs lands at:
+    # ~165MB content size an orangepi-zero3 rootfs lands at:
     # journal (16MB) + inode table/bitmaps/backups (~13MB) = ~29MB, before
     # a single content byte is written. A 32MB floor left only ~3MB of
     # itself as actual margin after that fixed cost -- not enough to

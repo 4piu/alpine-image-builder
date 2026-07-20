@@ -47,18 +47,18 @@ that enables its second USB host controller, off in the stock device
 tree. Both targets also carry a real `profiles/wifi/` — `recipes.txt` +
 `packages.txt` for an RTL8821CU USB dongle — worth a look as a working
 example before writing your own. `orangepi-zero3` is the first arm64
-target in this repo (Allwinner H618) — its `common/kernel.config`/
-`common/uboot.config` are still the empty/comment-only placeholders
-every new target starts with, and it needs `ATF_PLAT`/`ATF_VERSION` set
-in `board.env` since that SoC boots through ARM Trusted Firmware, unlike
-the other two targets here. It also carries a real `profiles/wifi/` of
-its own, a different (and heavier) case than the USB-dongle one above:
-its onboard wifi/BT chip has no mainline driver at all, so the profile
-vendors one via `patches/*.patch` (see "Kernel patches" below), plus
-the firmware that driver needs via `firmware/*` (see below), instead
-of just a `kernel.config` fragment — worth a look if you're bringing up
-a chip mainline doesn't support yet, not just enabling one it already
-does.
+target in this repo (Allwinner H618), and it needs `ATF_PLAT`/
+`ATF_VERSION` set in `board.env` since that SoC boots through ARM
+Trusted Firmware, unlike the other two targets here. Its onboard
+wifi/BT chip has no mainline driver at all, so `common/` vendors one
+via `patches/*.patch` (see "Kernel patches" below), plus the firmware
+that driver needs via `firmware/*` (see below), instead of just a
+`kernel.config` fragment — worth a look if you're bringing up a chip
+mainline doesn't support yet, not just enabling one it already does.
+Unlike the other two targets, it's always on here rather than gated
+behind a profile: this board only ships with this one wifi/BT chip
+onboard, so there's no alternative-hardware case a profile would be
+selecting between.
 
 Every artifact resolves the same way, board manifest → `common/` →
 `profiles/$(PROFILE)/`, but *how* each stage combines differs by
@@ -176,7 +176,6 @@ convention as `packages.txt`):
 ```
 # target/<name>/profiles/wifi/recipes.txt
 wifi-8821cu
-zstd-modules
 ```
 
 Each name resolves to `tools/recipes/<name>.config` and merges in
@@ -308,7 +307,7 @@ board's base `.dtb` to be built with dtc's `-@` symbol-table flag —
 mainline doesn't turn this on for every board, only ones upstream
 already expects to carry overlays. If `fdtoverlay` fails with `base
 blob does not have a '/__symbols__' node`, that's what's missing; fix
-it with a one-line kernel patch (see `orangepi-zero3/profiles/wifi/patches/`
+it with a one-line kernel patch (see `orangepi-zero3/common/patches/`
 for a real example) setting `DTC_FLAGS_<dtb-stem> := -@` in the
 relevant `arch/*/boot/dts/.../Makefile`, not by rewriting the overlay
 to avoid labels.
@@ -325,7 +324,7 @@ tracked, versioned, and updated independently of this repo. Reach for
 vendored out-of-tree driver via `patches/*.patch`, for instance) and
 the firmware has to travel with it.
 
-See `orangepi-zero3/profiles/wifi/firmware/wcnmodem.bin` for a real
+See `orangepi-zero3/common/firmware/wcnmodem.bin` for a real
 example. It is *not* decoded from the vendored driver's own
 `unisocwcn/fw/wcnmodem.bin.hex` (a multi-chip-variant pack meant to
 cover several Marlin3/Marlin3-Lite/Marlin3E chip steppings from one

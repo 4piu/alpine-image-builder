@@ -7,26 +7,28 @@ escape hatch below. See `target/README.md` for the mechanics (how
 fragments merge, how to capture a delta) — this doc is about what to
 actually put in a fragment and why.
 
-## The one gotcha that bites almost everyone: module compression
+## Don't compress kernel modules
 
-Alpine's `kmod`/`modprobe` expect kernel modules to be zstd-compressed.
-**If your change adds or enables *any* loadable module** (`=m`, not
-`=y`) — a wifi driver, anything picked up from a recipe in
-`tools/recipes/` — add this to your fragment:
-
-```
-CONFIG_MODULE_COMPRESS=y
-CONFIG_MODULE_COMPRESS_ZSTD=y
-```
-
-`menuconfig` does **not** enable this as a dependency of building a
-module — it's easy to flip on the driver you wanted, get a clean build,
-and then find `modprobe` silently fails to load it on the actual board.
-This isn't forced on by default: a stock, unmodified target ships
-without it, since a base image that never loads a module shouldn't
-carry a deviation from stock nobody asked for. It only becomes *your*
-problem the moment your own fragment adds a module — at which point it's
-squarely your problem, and now you know about it.
+An earlier version of this doc claimed the opposite of the truth here
+("Alpine's `kmod`/`modprobe` expect zstd-compressed modules") and told
+people to add `CONFIG_MODULE_COMPRESS=y`/`CONFIG_MODULE_COMPRESS_ZSTD=y`
+whenever a fragment adds a loadable module. Don't do that. `insmod`/
+`modprobe` don't care about compression either way — a plain
+uncompressed `.ko` loads exactly the same as a compressed one. The
+*kernel's own* in-kernel zstd decompressor (`CONFIG_MODULE_DECOMPRESS`,
+needed to read `.ko.zst` files back) is a separate, much more
+constrained implementation than a real `zstd` binary, and on real
+hardware (`orangepi-zero3`) it silently rejected valid
+zstd frames a standard `zstd -t` decompressed without complaint —
+"Invalid ELF header magic: != ELF" on modules that were never
+corrupted, seemingly at random (in practice, correlated with which
+modules were large/complex enough to hit whatever internal limit the
+in-kernel decompressor has), including modules the base image already
+depended on for things like `eth0`. Compression bought a modest rootfs
+size saving and cost real reliability for no requirement that actually
+existed. Just don't set `CONFIG_MODULE_COMPRESS`/`CONFIG_MODULE_COMPRESS_ZSTD`
+in any fragment, and don't apply the old `zstd-modules` recipe if you
+see it referenced anywhere stale — it no longer exists.
 
 ## Symbols that must stay builtin (`=y`), never a module (`=m`)
 

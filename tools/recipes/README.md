@@ -18,7 +18,7 @@ many recipes you want in one go, review the diff, then build. Good for
 taking a recipe as a starting point you intend to hand-edit further.
 
 ```
-tools/recipes/apply-recipes.sh target/<name>/profiles/<profile-name>/ wifi-8821cu zstd-modules
+tools/recipes/apply-recipes.sh target/<name>/profiles/<profile-name>/ wifi-8821cu
 ```
 
 Each applied recipe is tagged with a `# --- recipe: <name> ---` marker
@@ -39,13 +39,6 @@ applies regardless of which recipe you're using.
 
 ## Recipes
 
-- `zstd-modules` — kernel module compression
-  (`CONFIG_MODULE_COMPRESS_ZSTD`). Not needed for a stock, module-free
-  image, but needed by *any* recipe that adds a loadable module —
-  `menuconfig` doesn't turn this on as a dependency of building one, so
-  it's easy to add a driver, get a clean build, and have it silently fail
-  to load on the actual board. See `docs/kernel-customization.md`.
 - `wifi-8821cu` — RTL8821CU USB wifi. Mainlined
   (`drivers/net/wireless/realtek/rtw88`, `CONFIG_RTW88_8821CU`), just not
-  enabled by Alpine's stock kernel config. Pair with `zstd-modules` or
-  the driver won't load.
+  enabled by Alpine's stock kernel config.

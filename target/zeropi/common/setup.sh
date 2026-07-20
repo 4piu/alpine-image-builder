@@ -10,3 +10,11 @@
 # Add commands like:
 #   apk add --no-cache htop
 #   rc-update add some-service default
+
+# Disable kernel messages on the console
+cat > /etc/profile.d/00suppress_kmsg.sh << 'EOF'
+if [ "$(tty)" = "/dev/ttyS0" ] && [ $(cat /proc/sys/kernel/printk | awk '{print $1}') -gt 1 ]; then
+    echo "Suppressing low-priority kernel messages on serial console."
+    dmesg -n 1
+fi
+EOF
