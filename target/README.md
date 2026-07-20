@@ -18,7 +18,7 @@ target/<name>/
     patches/*.patch
     firmware/*              # extra files for the target's rootfs /lib/firmware
     packages.txt
-    setup.sh               # runs once, after first-boot rootfs expansion
+    setup.d/*.sh            # each runs once, after first-boot rootfs expansion
   profiles/<profile-name>/  # named, opt-in customization sets
     kernel.config
     uboot.config
@@ -29,7 +29,7 @@ target/<name>/
     patches/*.patch
     firmware/*
     packages.txt
-    setup.sh
+    setup.d/*.sh
 ```
 
 A target with nothing under `common/`/`profiles/` builds a stock image
@@ -73,7 +73,7 @@ kind:
 | `overlays/*.dts` | compiled and loaded independently | both apply (accumulate) |
 | `firmware/*` | copied into the rootfs's `/lib/firmware/` | both apply |
 | `packages.txt` | concatenated | both apply |
-| `setup.sh` | run in order, once | both run, common's first |
+| `setup.d/*.sh` | each runs in order, once | both apply (accumulate), common's first |
 | `boot.cmd` | full file replacement | profile's wins, common's ignored |
 | `dts/*.dts` | full file replacement | profile's wins, common's ignored |
 
@@ -376,11 +376,21 @@ a comment). `common/` and the profile's are concatenated, not merged by
 name — duplicate or conflicting entries are `apk`'s problem to resolve,
 not this tooling's.
 
-## `setup.sh`: one-time post-expansion hook
+## `setup.d/*.sh`: one-time post-expansion hook
 
-A script baked into the image and run **exactly once**, after first-boot
-rootfs expansion has fully completed — not on every boot, not
-mid-expansion. If both `common/setup.sh` and the profile's exist, both
-run, common's first, as two separate steps of the same hook. A script
-that exits non-zero leaves the hook installed to retry next boot rather
-than silently dropping the rest of your setup.
+A directory of small, independent scripts baked into the image and run
+**exactly once each**, after first-boot rootfs expansion has fully
+completed — not on every boot, not mid-expansion. Every
+`common/setup.d/*.sh` snippet runs first (sorted, so a numeric prefix
+like `10-foo.sh`/`20-bar.sh` controls order within the tier), then
+every `profile/setup.d/*.sh` one, each as its own separate step, not
+concatenated together. A script that exits non-zero leaves the whole
+hook installed to retry next boot rather than silently dropping
+whatever came after it.
+
+One file per concern, not one big script — a profile adding just "load
+this kernel module" doesn't need to touch or duplicate whatever
+`common/` already contributes, and two unrelated pieces (say, console
+setup and a board's wifi bring-up) stay separately readable instead of
+interleaved in one file. See `target/orangepi-zero3/common/setup.d/`
+for a real example with multiple snippets.

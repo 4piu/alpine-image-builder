@@ -224,10 +224,16 @@ BOOT_CMD_SOURCE := $(firstword $(wildcard $(PROFILE_DIR)/boot.cmd) $(wildcard $(
 PACKAGES_SOURCES := $(strip $(wildcard $(COMMON_DIR)/packages.txt) $(wildcard $(PROFILE_DIR)/packages.txt))
 PACKAGES_FILE := $(if $(PACKAGES_SOURCES),$(OUTPUT_DIR)/packages.merged.txt,)
 
-# One-time setup.sh hook (§10a) -- common's runs first, then the
-# profile's, as two separate steps of the same hook (see setup-hook.sh),
-# not concatenated text.
-SETUP_SCRIPTS := $(strip $(wildcard $(COMMON_DIR)/setup.sh) $(wildcard $(PROFILE_DIR)/setup.sh))
+# One-time setup.d/ hook (§10a) -- every common/setup.d/*.sh snippet
+# (sorted, so a numeric prefix like 10-foo.sh/20-bar.sh controls order
+# within a tier), then every profile/setup.d/*.sh snippet, each run as
+# its own separate step by setup-hook.sh, not concatenated text. A
+# directory of small, independently named snippets instead of one
+# big setup.sh -- lets a profile add just its own piece (e.g. "enable
+# this kernel module") without editing or duplicating whatever common/
+# already contributes, and keeps two unrelated concerns (say, console
+# setup and a board's wifi bring-up) in separate reviewable files.
+SETUP_SCRIPTS := $(strip $(sort $(wildcard $(COMMON_DIR)/setup.d/*.sh)) $(sort $(wildcard $(PROFILE_DIR)/setup.d/*.sh)))
 
 # sources/ is shared across whichever target/profile you build next, not
 # isolated per target (§"Before starting" #3 -- only one board is ever

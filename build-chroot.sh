@@ -49,10 +49,10 @@ if [ -f "$cdir/expand-rootfs.sh" ]; then
     sudo ln -sf "/etc/init.d/local" "$chroot_dir/etc/runlevels/default/local"
 fi
 
-# Install this target/profile's one-time setup.sh scripts (common/ first,
-# then the profile's own, per the merge order the Makefile resolves them
-# in) plus the generic hook that runs them once expand-rootfs.sh's
-# completion marker shows up (§10a).
+# Install this target/profile's one-time setup.d/*.sh snippets (every
+# common/ one first, then every profile/ one, per the merge order the
+# Makefile resolves them in) plus the generic hook that runs them once
+# expand-rootfs.sh's completion marker shows up (§10a).
 if [ -n "${SETUP_SCRIPTS:-}" ]; then
     sudo mkdir -p "$chroot_dir/etc/alpine-image-builder/setup.d"
     i=10

@@ -1,8 +1,9 @@
 #!/bin/sh
-# Runs a target/profile's setup.sh scripts exactly once, after first-boot
-# rootfs expansion has fully completed -- not on every boot, not mid-
-# expansion. Installed by build-chroot.sh as /etc/local.d/setup.start
-# only when a target/profile actually provides a setup.sh.
+# Runs a target/profile's setup.d/*.sh snippets exactly once, after
+# first-boot rootfs expansion has fully completed -- not on every boot,
+# not mid-expansion. Installed by build-chroot.sh as /etc/local.d/
+# setup.start only when a target/profile actually provides at least one
+# setup.d/*.sh snippet.
 #
 # expand-rootfs.sh spans multiple reboots before it's actually done, so a
 # same-boot-pass local.d ordering isn't enough to guarantee this runs

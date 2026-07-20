@@ -73,9 +73,10 @@ fi
 set -e
 echo "$LOG_PREFIX Expanding ext4 filesystem..." | tee $LOG_OUT
 resize2fs -f "$ROOT_PART"
-# Leave a positive marker before self-removing, so a later one-time setup.sh
-# hook (chained as a second local.d service) has something to gate on
-# without depending on this script or its runlevel symlink still existing.
+# Leave a positive marker before self-removing, so a later one-time
+# setup.d/*.sh hook (chained as a second local.d service) has something
+# to gate on without depending on this script or its runlevel symlink
+# still existing.
 touch "$DONE_MARKER"
 rm -f /etc/local.d/expand-rootfs.start
 reboot
