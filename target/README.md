@@ -16,6 +16,7 @@ target/<name>/
     overlays/*.dts
     dts/*.dts
     patches/*.patch
+    firmware/*              # extra files for the target's rootfs /lib/firmware
     packages.txt
     setup.sh               # runs once, after first-boot rootfs expansion
   profiles/<profile-name>/  # named, opt-in customization sets
@@ -26,6 +27,7 @@ target/<name>/
     overlays/*.dts
     dts/*.dts
     patches/*.patch
+    firmware/*
     packages.txt
     setup.sh
 ```
@@ -49,7 +51,14 @@ target in this repo (Allwinner H618) — its `common/kernel.config`/
 `common/uboot.config` are still the empty/comment-only placeholders
 every new target starts with, and it needs `ATF_PLAT`/`ATF_VERSION` set
 in `board.env` since that SoC boots through ARM Trusted Firmware, unlike
-the other two targets here.
+the other two targets here. It also carries a real `profiles/wifi/` of
+its own, a different (and heavier) case than the USB-dongle one above:
+its onboard wifi/BT chip has no mainline driver at all, so the profile
+vendors one via `patches/*.patch` (see "Kernel patches" below), plus
+the firmware that driver needs via `firmware/*` (see below), instead
+of just a `kernel.config` fragment — worth a look if you're bringing up
+a chip mainline doesn't support yet, not just enabling one it already
+does.
 
 Every artifact resolves the same way, board manifest → `common/` →
 `profiles/$(PROFILE)/`, but *how* each stage combines differs by
@@ -62,6 +71,7 @@ kind:
 | `recipes.txt` | resolved to `tools/recipes/<name>.config`, merged alongside this tier's `kernel.config` | both apply, profile's wins on conflict |
 | `patches/*.patch` | applied in order | both apply, common's first |
 | `overlays/*.dts` | compiled and loaded independently | both apply (accumulate) |
+| `firmware/*` | copied into the rootfs's `/lib/firmware/` | both apply |
 | `packages.txt` | concatenated | both apply |
 | `setup.sh` | run in order, once | both run, common's first |
 | `boot.cmd` | full file replacement | profile's wins, common's ignored |
@@ -289,6 +299,49 @@ make overlay-check TARGET=<name> PROFILE=<profile-name>   # compile + preview th
 
 `overlay-check` needs `fdtoverlay` (not part of `make check-tools`'s
 required list — it's only needed for this optional review step).
+
+A fragment can target a node by path (`target-path = "/soc/whatever@..."`)
+without any extra setup. Targeting by label (`target = <&whatever>`), or
+referencing another node by label from *inside* a fragment's own
+properties (a `<&pio ...>` gpio reference, for instance), needs the
+board's base `.dtb` to be built with dtc's `-@` symbol-table flag —
+mainline doesn't turn this on for every board, only ones upstream
+already expects to carry overlays. If `fdtoverlay` fails with `base
+blob does not have a '/__symbols__' node`, that's what's missing; fix
+it with a one-line kernel patch (see `orangepi-zero3/profiles/wifi/patches/`
+for a real example) setting `DTC_FLAGS_<dtb-stem> := -@` in the
+relevant `arch/*/boot/dts/.../Makefile`, not by rewriting the overlay
+to avoid labels.
+
+## `firmware/*`
+
+Files copied verbatim into the rootfs's `/lib/firmware/` — for a driver
+whose firmware isn't already carried by an apk package
+(`linux-firmware-*` and similar) and has to be vendored in this
+target/profile itself. Most drivers don't need this: check for an
+existing `linux-firmware-*` apk first, and prefer that — it's already
+tracked, versioned, and updated independently of this repo. Reach for
+`firmware/*` when the driver itself isn't in a package either (a
+vendored out-of-tree driver via `patches/*.patch`, for instance) and
+the firmware has to travel with it.
+
+See `orangepi-zero3/profiles/wifi/firmware/wcnmodem.bin` for a real
+example. It is *not* decoded from the vendored driver's own
+`unisocwcn/fw/wcnmodem.bin.hex` (a multi-chip-variant pack meant to
+cover several Marlin3/Marlin3-Lite/Marlin3E chip steppings from one
+file) — confirmed on real hardware, that pack has no image for the
+Marlin3-Lite stepping this board's AW859A module actually ships
+(chipid `0x2355b001`), only Marlin3 and Marlin3E ones, so the driver's
+own chip-to-image matching (`marlin_judge_images()` in
+`patches/0001-vendor-uwe5622-driver.patch`) can never find a usable
+entry for it. The real, working firmware here was instead pulled from
+a live Armbian (6.12.23) boot on the same physical board — confirmed
+booting that image gets a working `wlan0`, then `/lib/firmware/uwe5622/
+wcnmodem.bin` from that install was copied out over SSH. Different chip
+steppings genuinely need different firmware; when the vendored driver
+source doesn't carry the one you need, a known-working distro image for
+the *same physical board* is a legitimate source to pull the real
+binary from — prefer it over guessing at a substitute image.
 
 ## `boot.cmd`
 

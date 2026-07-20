@@ -195,6 +195,14 @@ OVERLAY_TARGETS_COMMON := $(patsubst $(COMMON_DIR)/overlays/%.dts,$(OUTPUT_DIR)/
 OVERLAY_TARGETS_PROFILE := $(patsubst $(PROFILE_DIR)/overlays/%.dts,$(OUTPUT_DIR)/overlay/%.dtbo,$(OVERLAY_SOURCES_PROFILE))
 OVERLAY_TARGETS := $(strip $(OVERLAY_TARGETS_COMMON) $(OVERLAY_TARGETS_PROFILE))
 
+# Extra /lib/firmware files -- accumulate, same idea as overlays above.
+# For a driver whose firmware isn't already carried by an apk package
+# (linux-firmware-*, etc.) and has to be vendored in this target/profile
+# itself instead.
+FIRMWARE_SOURCES_COMMON := $(wildcard $(COMMON_DIR)/firmware/*)
+FIRMWARE_SOURCES_PROFILE := $(wildcard $(PROFILE_DIR)/firmware/*)
+FIRMWARE_SOURCES := $(strip $(FIRMWARE_SOURCES_COMMON) $(FIRMWARE_SOURCES_PROFILE))
+
 # boot.cmd -- full override, same precedence as the DTS override above:
 # profile's wins over common's wins over the shipped default template.
 BOOT_CMD_SOURCE := $(firstword $(wildcard $(PROFILE_DIR)/boot.cmd) $(wildcard $(COMMON_DIR)/boot.cmd) boot.cmd.template)
@@ -338,13 +346,21 @@ build:
 
 # DT Overlays -- two static pattern rules, one per source directory (see
 # OVERLAY_TARGETS_COMMON/PROFILE above for why one rule can't cover both).
-$(OVERLAY_TARGETS_COMMON): $(OUTPUT_DIR)/overlay/%.dtbo: $(COMMON_DIR)/overlays/%.dts | $(OUTPUT_DIR)/
+# Preprocessed through cpp first, same as the kernel's own dtb build --
+# an overlay that needs a dt-bindings header (GPIO_ACTIVE_HIGH and
+# friends) is unusable as plain dtc input; #include/#define aren't
+# something dtc itself understands.
+$(OVERLAY_TARGETS_COMMON): $(OUTPUT_DIR)/overlay/%.dtbo: $(COMMON_DIR)/overlays/%.dts | sources/linux.ready $(OUTPUT_DIR)/
 	@mkdir -p $(OUTPUT_DIR)/overlay
-	dtc -@ -I dts -O dtb -o $@ $<
+	$(CROSS_COMPILE)gcc -E -nostdinc -I sources/linux/include \
+	    -I sources/linux/arch/$(ARCH)/boot/dts -undef -D__DTS__ \
+	    -x assembler-with-cpp $< | dtc -@ -I dts -O dtb -o $@ -
 
-$(OVERLAY_TARGETS_PROFILE): $(OUTPUT_DIR)/overlay/%.dtbo: $(PROFILE_DIR)/overlays/%.dts | $(OUTPUT_DIR)/
+$(OVERLAY_TARGETS_PROFILE): $(OUTPUT_DIR)/overlay/%.dtbo: $(PROFILE_DIR)/overlays/%.dts | sources/linux.ready $(OUTPUT_DIR)/
 	@mkdir -p $(OUTPUT_DIR)/overlay
-	dtc -@ -I dts -O dtb -o $@ $<
+	$(CROSS_COMPILE)gcc -E -nostdinc -I sources/linux/include \
+	    -I sources/linux/arch/$(ARCH)/boot/dts -undef -D__DTS__ \
+	    -x assembler-with-cpp $< | dtc -@ -I dts -O dtb -o $@ -
 
 .PHONY: overlays
 overlays: $(OVERLAY_TARGETS)
@@ -463,11 +479,20 @@ $(ROOTFS_DIR)/lib/modules: $(ROOTFS_DIR) $(KERNEL_PRODUCTS)
 	$(MAKE) -C sources/linux/ $(MAKEFLAGS) KCFLAGS=-fdiagnostics-color=always modules
 	sudo $(MAKE) -C sources/linux/ $(MAKEFLAGS) INSTALL_MOD_PATH=$(abspath $(ROOTFS_DIR)) modules_install
 
-$(ROOTFS_TARBALL): $(ROOTFS_DIR)/lib/modules | $(OUTPUT_DIR)/
+# Extra /lib/firmware files -- see FIRMWARE_SOURCES above. Depends on
+# lib/modules (not just $(ROOTFS_DIR)) purely for ordering: both write
+# into the rootfs as root, and modules_install already owns creating
+# /lib, so this just adds to it rather than racing to create it too.
+$(ROOTFS_DIR)/.firmware-installed: $(ROOTFS_DIR)/lib/modules $(FIRMWARE_SOURCES)
+	sudo mkdir -p $(ROOTFS_DIR)/lib/firmware
+	$(if $(FIRMWARE_SOURCES),sudo cp $(FIRMWARE_SOURCES) $(ROOTFS_DIR)/lib/firmware/)
+	sudo touch $@
+
+$(ROOTFS_TARBALL): $(ROOTFS_DIR)/.firmware-installed | $(OUTPUT_DIR)/
 	sudo tar -C $(ROOTFS_DIR) -czf $@ .
 
 # Final image
-$(IMAGE): make-image.sh $(OUTPUT_DIR)/$(UBOOT_FORMAT_CUSTOM_NAME) $(OUTPUT_DIR)/boot.scr $(ROOTFS_DIR)/lib/modules $(KERNEL_PRODUCTS_OUTPUT) $(OVERLAY_TARGETS) | $(OUTPUT_DIR)/
+$(IMAGE): make-image.sh $(OUTPUT_DIR)/$(UBOOT_FORMAT_CUSTOM_NAME) $(OUTPUT_DIR)/boot.scr $(ROOTFS_DIR)/.firmware-installed $(KERNEL_PRODUCTS_OUTPUT) $(OVERLAY_TARGETS) | $(OUTPUT_DIR)/
 	sudo sh -c "                                              \
 	    UBOOT='$(OUTPUT_DIR)/$(UBOOT_FORMAT_CUSTOM_NAME)'     \
 	    UBOOT_WRITE_OFFSET='$(UBOOT_WRITE_OFFSET)'            \
