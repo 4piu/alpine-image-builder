@@ -1,0 +1,68 @@
+diff --git a/drivers/bluetooth/hci_ldisc.c b/drivers/bluetooth/hci_ldisc.c
+index d0adae326..51a4eea2e 100644
+--- a/drivers/bluetooth/hci_ldisc.c
++++ b/drivers/bluetooth/hci_ldisc.c
+@@ -666,6 +666,21 @@ static int hci_uart_register_dev(struct hci_uart *hu)
+ 	hdev->setup = hci_uart_setup;
+ 	SET_HCIDEV_DEV(hdev, hu->tty->dev);
+ 
++	/*
++	 * Spreadtrum/Unisoc (sprd) combo wifi/BT chips (uwe5622 and
++	 * siblings) expose their controller as an "ttyBT*" tty (see
++	 * tty-sdio/sprdbt_tty.c) and declare RSWITCH/HOLD/SNIFF/PARK
++	 * link-policy support in their LMP features, but
++	 * HCI_OP_WRITE_DEF_LINK_POLICY fails on real hardware ("Opcode
++	 * 0x080f failed: -22", blocking hci_dev_open entirely) for any
++	 * non-zero policy value -- confirmed by testing with only PARK
++	 * masked out first (still failed identically), so this isn't a
++	 * single-bit problem, the command just isn't implemented at all
++	 * despite the advertised features.
++	 */
++	if (hu->tty->driver && !strncmp(hu->tty->driver->name, "ttyBT", 5))
++		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_LINK_POLICY);
++
+ 	if (test_bit(HCI_UART_RAW_DEVICE, &hu->hdev_flags))
+ 		hci_set_quirk(hdev, HCI_QUIRK_RAW_DEVICE);
+ 
+diff --git a/include/net/bluetooth/hci.h b/include/net/bluetooth/hci.h
+index cb4c02d00..ed63c5488 100644
+--- a/include/net/bluetooth/hci.h
++++ b/include/net/bluetooth/hci.h
+@@ -255,6 +255,13 @@ enum {
+ 	 */
+ 	HCI_QUIRK_BROKEN_READ_TRANSMIT_POWER,
+ 
++	/*
++	 * Device advertises RSWITCH/HOLD/SNIFF/PARK link-policy support
++	 * in its LMP features, but Write Default Link Policy Settings
++	 * fails for any non-zero value -- skip that command entirely.
++	 */
++	HCI_QUIRK_BROKEN_LINK_POLICY,
++
+ 	/* When this quirk is set, HCI_OP_SET_EVENT_FLT requests with
+ 	 * HCI_FLT_CLEAR_ALL are ignored and event filtering is
+ 	 * completely avoided. A subset of the CSR controller
+diff --git a/net/bluetooth/hci_sync.c b/net/bluetooth/hci_sync.c
+index 6e76798ec..815c8e65a 100644
+--- a/net/bluetooth/hci_sync.c
++++ b/net/bluetooth/hci_sync.c
+@@ -4196,6 +4196,19 @@ static int hci_setup_link_policy_sync(struct hci_dev *hdev)
+ 	if (!(hdev->commands[5] & 0x10))
+ 		return 0;
+ 
++	/*
++	 * Some controllers (confirmed on a Spreadtrum/Unisoc uwe5622)
++	 * advertise link-policy features (RSWITCH/HOLD/SNIFF/PARK) in
++	 * their LMP feature bits that the firmware doesn't actually
++	 * implement -- Write Default Link Policy Settings fails with
++	 * "Invalid HCI Command Parameters" (-22) for any non-zero
++	 * policy value, not just PARK alone. Skip the command entirely
++	 * rather than guessing which subset of the advertised bits is
++	 * real.
++	 */
++	if (hci_test_quirk(hdev, HCI_QUIRK_BROKEN_LINK_POLICY))
++		return 0;
++
+ 	memset(&cp, 0, sizeof(cp));
+ 
+ 	if (lmp_rswitch_capable(hdev))

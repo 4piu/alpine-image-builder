@@ -1,0 +1,31 @@
+diff --git a/drivers/mmc/core/pwrseq_simple.c b/drivers/mmc/core/pwrseq_simple.c
+index 4b47e6c3b..37ef5d3ef 100644
+--- a/drivers/mmc/core/pwrseq_simple.c
++++ b/drivers/mmc/core/pwrseq_simple.c
+@@ -137,9 +137,23 @@ static int mmc_pwrseq_simple_probe(struct platform_device *pdev)
+ 	ngpio = of_count_phandle_with_args(dev->of_node, "reset-gpios", "#gpio-cells");
+ 	if (ngpio == 1) {
+ 		pwrseq->reset_ctrl = devm_reset_control_get_optional_shared(dev, NULL);
+-		if (IS_ERR(pwrseq->reset_ctrl))
+-			return dev_err_probe(dev, PTR_ERR(pwrseq->reset_ctrl),
+-					     "reset control not ready\n");
++		if (IS_ERR(pwrseq->reset_ctrl)) {
++			/*
++			 * -ENOENT here doesn't mean "no reset line at all" --
++			 * it also covers a reset-gpios entry the generic
++			 * reset-controller/GPIO bridge can't represent (e.g.
++			 * a #gpio-cells=3 controller like sunxi's pinctrl;
++			 * see __reset_add_reset_gpio_device()'s args_count!=2
++			 * check in drivers/reset/core.c). That's not a real
++			 * probe failure, just this path not being usable --
++			 * fall through to plain GPIO consumption below,
++			 * which handles any #gpio-cells count.
++			 */
++			if (PTR_ERR(pwrseq->reset_ctrl) != -ENOENT)
++				return dev_err_probe(dev, PTR_ERR(pwrseq->reset_ctrl),
++						     "reset control not ready\n");
++			pwrseq->reset_ctrl = NULL;
++		}
+ 	}
+ 
+ 	/*

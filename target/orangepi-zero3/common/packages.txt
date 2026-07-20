@@ -1,8 +1,18 @@
-# Extra apk packages for this target, installed into the rootfs -- see
-# target/README.md. One per line, # comments and blank lines ignored.
-# Empty has no effect -- just the packages already pulled in by the base
-# image.
+# Companion packages for this target's onboard AW859A wifi/BT -- see
+# target/README.md and common/patches/, kernel.config, overlays/.
 #
-# Add lines like:
-#   htop
-#   openssh
+# Regulatory database -- CONFIG_CFG80211_REQUIRE_SIGNED_REGDB is on in
+# the base kernel config, so cfg80211 refuses to enable any channels
+# at all without this present in the rootfs.
+wireless-regdb
+
+# Userspace BT stack. The BT side of this chip talks HCI-over-UART
+# via sprdbt_tty.ko's tty device, not a self-registering HCI device --
+# something still needs to run hciattach against that tty at boot;
+# modern bluez split hciattach out into bluez-deprecated. Not yet
+# wired into setup.sh: what the tty device is actually named and
+# which hciattach protocol it needs are two more unknowns only a real
+# boot log can answer.
+bluez
+bluez-openrc
+bluez-deprecated

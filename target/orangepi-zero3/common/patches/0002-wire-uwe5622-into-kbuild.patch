@@ -1,0 +1,23 @@
+diff --git a/drivers/net/wireless/Kconfig b/drivers/net/wireless/Kconfig
+index c6599594d..dcc58210d 100644
+--- a/drivers/net/wireless/Kconfig
++++ b/drivers/net/wireless/Kconfig
+@@ -36,6 +36,7 @@ source "drivers/net/wireless/st/Kconfig"
+ source "drivers/net/wireless/ti/Kconfig"
+ source "drivers/net/wireless/zydas/Kconfig"
+ source "drivers/net/wireless/quantenna/Kconfig"
++source "drivers/net/wireless/uwe5622/Kconfig"
+ 
+ source "drivers/net/wireless/virtual/Kconfig"
+ 
+diff --git a/drivers/net/wireless/Makefile b/drivers/net/wireless/Makefile
+index e1c4141c6..4192ce233 100644
+--- a/drivers/net/wireless/Makefile
++++ b/drivers/net/wireless/Makefile
+@@ -21,5 +21,6 @@ obj-$(CONFIG_WLAN_VENDOR_SILABS) += silabs/
+ obj-$(CONFIG_WLAN_VENDOR_ST) += st/
+ obj-$(CONFIG_WLAN_VENDOR_TI) += ti/
+ obj-$(CONFIG_WLAN_VENDOR_ZYDAS) += zydas/
++obj-$(CONFIG_SPARD_WLAN_SUPPORT) += uwe5622/
+ 
+ obj-$(CONFIG_WLAN) += virtual/
