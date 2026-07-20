@@ -21,6 +21,17 @@ MK_RED := $(shell printf '\033[0;31m')
 MK_YELLOW := $(shell printf '\033[0;33m')
 MK_NC := $(shell printf '\033[0m')
 
+# distclean is the full nuke button (output/ for every target, plus the
+# shared sources/ checkouts) -- see its recipe near the bottom of this
+# file. It doesn't touch anything board-specific, so it doesn't need a
+# valid TARGET/board.env either; skip all of that resolution/validation
+# entirely when it's the goal. Requiring a real board just to delete
+# files was a real deadlock before this guard existed: switching TARGET
+# after an ATF board left sources/atf checked out for the old
+# ATF_VERSION, and even 'make TARGET=<new> distclean' refused to start
+# -- distclean exists to fix exactly that, so it can't be blocked by it.
+ifeq ($(filter distclean,$(MAKECMDGOALS)),)
+
 ifeq ($(TARGET),)
 $(error $(MK_RED)TARGET is required, e.g. make build TARGET=nanopi-neo — see target/README.md$(MK_NC))
 endif
@@ -224,6 +235,16 @@ SETUP_SCRIPTS := $(strip $(wildcard $(COMMON_DIR)/setup.sh) $(wildcard $(PROFILE
 # problem that doesn't exist). What's real: a stale checkout for the wrong
 # KERNEL_VERSION/UBOOT_VERSION would otherwise silently ship the wrong
 # kernel/U-Boot. Block on that instead of warning.
+#
+# Skipped when the goal is clean (distclean is already excluded by the
+# outer guard above): clean doesn't touch sources/linux or sources/
+# u-boot at all -- these checks (and the fingerprint ones further down,
+# also inside this guard) exist to protect *those*, so running them for
+# a goal that never touches them is just pointless friction: a
+# confusing "identity changed, discarding .config" warning, plus the
+# $(shell rm -f ...) side effect actually deleting a perfectly good
+# .config, for a plain `make clean` that has nothing to do with either.
+ifeq ($(filter clean,$(MAKECMDGOALS)),)
 ifneq ($(wildcard sources/linux.ready),)
 LINUX_READY_VERSION := $(shell cat sources/linux.ready)
 ifneq ($(LINUX_READY_VERSION),$(KERNEL_VERSION))
@@ -264,6 +285,7 @@ endif
 endif
 
 # Kernel config fragments don't mutate sources/linux (unlike patches) --
+# (still inside the clean-skip guard opened above -- same reasoning)
 # they only ever get merged into .config -- but the same "switching
 # TARGET/PROFILE can change the fragment SET, not just edit a fragment
 # already in it" problem applies: a plain mtime-based prerequisite can't
@@ -301,6 +323,8 @@ ifneq ($(RECORDED_UBOOT_CONFIG_FINGERPRINT),$(UBOOT_CONFIG_FINGERPRINT))
 $(warning $(MK_YELLOW)U-Boot config/board identity changed since sources/u-boot/.config was last built (different TARGET/PROFILE, or the board's ARCH/UBOOT_BOARD_DEFCONFIG differs) -- discarding it and rebuilding from scratch.$(MK_NC))
 $(shell rm -f sources/u-boot/.config)
 endif
+
+endif # clean skip (opened above, around the version-mismatch checks)
 
 ################################################################################
 
@@ -504,6 +528,8 @@ $(IMAGE): make-image.sh $(OUTPUT_DIR)/$(UBOOT_FORMAT_CUSTOM_NAME) $(OUTPUT_DIR)/
 	    IMAGE='$@'                                            \
 	    ./make-image.sh"
 
+endif # distclean skip (TARGET-required guard, near the top of this file)
+
 .PHONY: clean
 .SILENT: clean
 clean:
@@ -512,10 +538,26 @@ clean:
 
 .PHONY: distclean
 .SILENT: distclean
-distclean: clean
-	if [ -d sources/u-boot/ ]; then $(MAKE) -C sources/u-boot/ clean; fi
-	if [ -d sources/linux/ ]; then $(MAKE) -C sources/linux/ clean; fi
-	rm -rf sources/apk-tools sources/u-boot.ready sources/linux.ready sources/atf sources/atf.ready sources/.tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
+# The nuke button -- deliberately NOT scoped to one TARGET/PROFILE (see
+# the guard around the board-resolution block near the top of this
+# file, which skips TARGET/board.env entirely for this goal). Wipes
+# output/ wholesale (every target/profile you've ever built, not just
+# whichever TARGET happens to be set right now) plus sources/, the
+# shared kernel/U-Boot/ATF checkouts.
+#
+# rm -rf the whole sources/u-boot and sources/linux checkouts, not just
+# their build artifacts (an earlier version did `$(MAKE) -C sources/
+# u-boot/ clean` instead, which only cleans *inside* an existing
+# checkout, leaving the checkout itself, .git and all, in place) --
+# that left sources/u-boot.ready gone but sources/u-boot/ still
+# present, and the next build's `git clone ... 'sources/u-boot'` rule
+# refused to clone into an already-existing, non-empty directory.
+# Removing the whole directory keeps "no .ready marker" and "no
+# checkout" in sync, which is what every rule that checks for the
+# marker actually assumes.
+distclean:
+	if [ -d output ]; then sudo rm -rf output; fi
+	rm -rf sources/apk-tools sources/u-boot sources/u-boot.ready sources/linux sources/linux.ready sources/atf sources/atf.ready sources/.tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
 
 .PHONY: check-tools
 check-tools:
