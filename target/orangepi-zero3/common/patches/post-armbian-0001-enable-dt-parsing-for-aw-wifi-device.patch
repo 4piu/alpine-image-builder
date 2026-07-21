@@ -1,0 +1,27 @@
+# This project's own adaptation, not from Armbian -- checked directly and
+# confirmed necessary. Armbian's driver source (armbian-0001) already
+# selects the real CONFIG_AW_WIFI_DEVICE_UWE5622 board variant (see
+# drivers/net/wireless/uwe5622/Kconfig, added by that patch) instead of
+# this project's own earlier custom CONFIG_SUNXI_WIFI_DEVICE_UWE5622
+# symbol -- but that variant's own Makefile section leaves
+# CONFIG_WCN_PARSE_DTS commented out by default, meaning the driver would
+# expect Allwinner's own downstream sunxi-wlan.c platform glue (see the
+# `extern int sunxi_wlan_get_oob_irq(...)` declarations in
+# unisocwcn/platform/wcn_boot.c) instead of parsing the devicetree node
+# common/overlays/sun50i-h618-orangepi-zero3-wifi.dts provides. That glue
+# code isn't vendored here (and isn't in mainline either) -- flip the one
+# line that makes this variant DT-driven instead, same as this project's
+# now-superseded custom Kconfig symbol used to.
+diff --git a/drivers/net/wireless/uwe5622/unisocwcn/Makefile b/drivers/net/wireless/uwe5622/unisocwcn/Makefile
+index abcdef123..123abcdef 100644
+--- a/drivers/net/wireless/uwe5622/unisocwcn/Makefile
++++ b/drivers/net/wireless/uwe5622/unisocwcn/Makefile
+@@ -318,7 +318,7 @@ ifneq ($(TARGET_BUILD_VARIANT),user)
+ ifeq ($(CONFIG_AW_WIFI_DEVICE_UWE5622),y)
+ #### add cflag ######
+ ccflags-y += -DCONFIG_AW_BOARD
+-#ccflags-y += -DCONFIG_WCN_PARSE_DTS
++ccflags-y += -DCONFIG_WCN_PARSE_DTS
+ #ccflags-y += -DCONFIG_WCN_CHIPEN
+ #ccflags-y += -DCONFIG_WCN_RESET
+ #ccflags-y += -DCONFIG_WCN_RESET_PIN_CONNECTED

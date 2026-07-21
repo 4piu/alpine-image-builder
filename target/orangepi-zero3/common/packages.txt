@@ -6,13 +6,25 @@
 # at all without this present in the rootfs.
 wireless-regdb
 
+# Userspace wifi stack -- confirmed on real hardware that wlan0 comes up
+# (driver/firmware load succeeds, see setup.d/20-wifi-bt-modules.sh) but
+# there's nothing here to actually scan/associate with: no iw, no
+# wpa_supplicant. Both needed for anything beyond "the interface exists".
+iw
+wpa_supplicant
+wpa_supplicant-openrc
+
 # Userspace BT stack. The BT side of this chip talks HCI-over-UART
 # via sprdbt_tty.ko's tty device, not a self-registering HCI device --
 # something still needs to run hciattach against that tty at boot;
-# modern bluez split hciattach out into bluez-deprecated. Not yet
-# wired into setup.sh: what the tty device is actually named and
-# which hciattach protocol it needs are two more unknowns only a real
-# boot log can answer.
+# modern bluez split hciattach out into bluez-deprecated. bluetoothd
+# itself needs a running D-Bus system bus to register on -- confirmed on
+# real hardware: bluetoothctl fails with a D-Bus connection assertion
+# without it. Neither dbus nor bluetoothd start themselves just because
+# the packages are installed -- see setup.d/40-enable-bt-services.sh for
+# the rc-update wiring both need.
 bluez
 bluez-openrc
 bluez-deprecated
+dbus
+dbus-openrc

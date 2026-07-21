@@ -16,6 +16,7 @@ target/<name>/
     overlays/*.dts
     dts/*.dts
     patches/*.patch
+    uboot-patches/*.patch   # U-Boot source patches -- same idea as patches/*.patch
     firmware/*              # extra files for the target's rootfs /lib/firmware
     packages.txt
     setup.d/*.sh            # each runs once, after first-boot rootfs expansion
@@ -27,6 +28,7 @@ target/<name>/
     overlays/*.dts
     dts/*.dts
     patches/*.patch
+    uboot-patches/*.patch
     firmware/*
     packages.txt
     setup.d/*.sh
@@ -58,7 +60,15 @@ mainline doesn't support yet, not just enabling one it already does.
 Unlike the other two targets, it's always on here rather than gated
 behind a profile: this board only ships with this one wifi/BT chip
 onboard, so there's no alternative-hardware case a profile would be
-selecting between.
+selecting between. Most of that patch set (`patches/armbian-*.patch`,
+`patches/0006-*.patch`) is imported from `armbian/build`/`armbian/firmware`
+via `tools/armbian-import.sh` rather than hand-vendored from scratch —
+see `docs/importing-from-armbian.md` and
+`notes/armbian-kernel-patches-brainstorm.md`'s case study for what that
+process actually looked like, including the parts (three files:
+`patches/0002`-`0005`, `patches/post-armbian-0001-*`, and two of
+`patches/armbian-0016`'s compile-only fixes) that stayed hand-written
+because nothing upstream covered them.
 
 Every artifact resolves the same way, board manifest → `common/` →
 `profiles/$(PROFILE)/`, but *how* each stage combines differs by
@@ -70,6 +80,7 @@ kind:
 | `uboot.config` | fragments, merged via `merge_config.sh` (same idea, U-Boot's own copy of the script) | both apply, profile's wins on conflict |
 | `recipes.txt` | resolved to `tools/recipes/<name>.config`, merged alongside this tier's `kernel.config` | both apply, profile's wins on conflict |
 | `patches/*.patch` | applied in order | both apply, common's first |
+| `uboot-patches/*.patch` | applied in order (U-Boot's own tree, via `prepare-uboot-tree.sh`) | both apply, common's first |
 | `overlays/*.dts` | compiled and loaded independently | both apply (accumulate) |
 | `firmware/*` | copied into the rootfs's `/lib/firmware/` | both apply |
 | `packages.txt` | concatenated | both apply |
@@ -267,6 +278,26 @@ kernel source tree to pristine and reapplies patches from scratch —
 handled automatically, nothing to do on your end beyond writing patches
 that apply cleanly against the `KERNEL_VERSION` this target builds.
 
+Don't hand-derive these from scratch if you don't have to — check
+`tools/armbian-import.sh`/`docs/importing-from-armbian.md` first. A real
+board (`orangepi-zero3`) needed a whole out-of-tree driver this way;
+checking Armbian's own patch chain first turned a from-scratch
+driver-integration effort into "import, then fix the handful of things
+Armbian doesn't cover" — see
+`notes/armbian-kernel-patches-brainstorm.md`'s case study for exactly
+what that did and didn't save.
+
+## U-Boot patches: `uboot-patches/*.patch`
+
+Same idea as kernel patches above, applied to the shared U-Boot source
+tree via `prepare-uboot-tree.sh` instead of `prepare-linux-tree.sh` —
+common's first then the profile's, must apply cleanly against
+`UBOOT_VERSION` or the build hard-fails, resets and reapplies from
+scratch on a `TARGET`/`PROFILE` switch. No DTS-override equivalent on
+this side. For a board that needs a vendor DRAM-timing or SPL fix
+before its own U-Boot port is fully upstream — `uboot.config` only
+covers a Kconfig-level fragment, this is for actual source changes.
+
 ## DTS full replacement: `dts/*.dts`
 
 The escape hatch for a board revision the base device tree doesn't
@@ -332,13 +363,19 @@ file) — confirmed on real hardware, that pack has no image for the
 Marlin3-Lite stepping this board's AW859A module actually ships
 (chipid `0x2355b001`), only Marlin3 and Marlin3E ones, so the driver's
 own chip-to-image matching (`marlin_judge_images()` in
-`patches/0001-vendor-uwe5622-driver.patch`) can never find a usable
-entry for it. The real, working firmware here was instead pulled from
-a live Armbian (6.12.23) boot on the same physical board — confirmed
-booting that image gets a working `wlan0`, then `/lib/firmware/uwe5622/
-wcnmodem.bin` from that install was copied out over SSH. Different chip
-steppings genuinely need different firmware; when the vendored driver
-source doesn't carry the one you need, a known-working distro image for
+`patches/armbian-0001-uwe5622-allwinner-v6.3.patch`) can never find a
+usable entry for it. The real, working firmware here was originally
+pulled from a live Armbian (6.12.23) boot on the same physical board —
+confirmed booting that image gets a working `wlan0`, then
+`/lib/firmware/uwe5622/wcnmodem.bin` from that install was copied out
+over SSH — and later confirmed to be byte-identical (SHA256-checked) to
+`armbian/firmware`'s own `uwe5622/wcnmodem.bin`, reachable directly via
+`tools/armbian-import.sh import ... firmware uwe5622/wcnmodem.bin`
+without needing physical hardware at all — see
+`docs/importing-from-armbian.md`. Different chip steppings genuinely
+need different firmware; when the vendored driver source doesn't carry
+the one you need, a known-working distro image (or, per the above,
+that distro's own separate firmware repo) for
 the *same physical board* is a legitimate source to pull the real
 binary from — prefer it over guessing at a substitute image.
 

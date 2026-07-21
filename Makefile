@@ -196,6 +196,14 @@ UBOOT_CONFIG_FRAGMENTS := $(strip $(wildcard $(COMMON_DIR)/uboot.config) $(wildc
 # reset and reapply, not accumulate -- see prepare-linux-tree.sh.
 PATCH_FILES := $(strip $(sort $(wildcard $(COMMON_DIR)/patches/*.patch)) $(sort $(wildcard $(PROFILE_DIR)/patches/*.patch)))
 
+# U-Boot source patches -- same idea and same reset/reapply contract as
+# the kernel's own PATCH_FILES above, via prepare-uboot-tree.sh instead of
+# prepare-linux-tree.sh. Needed for boards that vendor a U-Boot-side fix
+# (DRAM timing, SPL quirks) the way some boards already need kernel
+# patches for out-of-tree drivers -- uboot.config alone only covers a
+# Kconfig-level fragment, not source changes.
+UBOOT_PATCH_FILES := $(strip $(sort $(wildcard $(COMMON_DIR)/uboot-patches/*.patch)) $(sort $(wildcard $(PROFILE_DIR)/uboot-patches/*.patch)))
+
 # DT overlays -- accumulate (common's and the profile's both apply),
 # unlike boot.cmd/dts which are full overrides. Two static pattern rules
 # below, one per source directory, since each output basename needs to
@@ -287,6 +295,19 @@ $(error $(MK_RED)Preparing sources/linux for TARGET=$(TARGET) PROFILE=$(PROFILE)
 endif
 ifeq ($(PREPARE_LINUX_TREE_RESULT),CHANGED)
 $(shell rm -f sources/linux/.config)
+endif
+endif
+
+# Same principle, same mechanism, for U-Boot's own patches -- see
+# prepare-uboot-tree.sh. No DTS-override equivalent on this side, so this
+# is a strict subset of the kernel's own version above.
+ifneq ($(wildcard sources/u-boot/.git),)
+PREPARE_UBOOT_TREE_RESULT := $(shell ./prepare-uboot-tree.sh sources/u-boot sources/.uboot-tree-prepared $(UBOOT_PATCH_FILES))
+ifneq ($(.SHELLSTATUS),0)
+$(error $(MK_RED)Preparing sources/u-boot for TARGET=$(TARGET) PROFILE=$(PROFILE) failed -- see output above$(MK_NC))
+endif
+ifeq ($(PREPARE_UBOOT_TREE_RESULT),CHANGED)
+$(shell rm -f sources/u-boot/.config)
 endif
 endif
 
@@ -419,7 +440,13 @@ sources/u-boot.ready:
 	git clone --depth 1 --branch $(UBOOT_VERSION) git://git.denx.de/u-boot.git 'sources/u-boot'
 	echo '$(UBOOT_VERSION)' > $@
 
-sources/u-boot/.config: sources/u-boot.ready $(UBOOT_CONFIG_FRAGMENTS)
+# ./prepare-uboot-tree.sh here covers the fresh-clone path (nothing to
+# reset yet, so the parse-time check above skipped it); it's a fast no-op
+# if the parse-time check already handled this target/profile's patches --
+# same reasoning as sources/linux/.config's own prepare-linux-tree.sh call
+# below.
+sources/u-boot/.config: sources/u-boot.ready $(UBOOT_PATCH_FILES) $(UBOOT_CONFIG_FRAGMENTS)
+	./prepare-uboot-tree.sh sources/u-boot sources/.uboot-tree-prepared $(UBOOT_PATCH_FILES)
 	$(MAKE) -C sources/u-boot/ '$(UBOOT_BOARD_DEFCONFIG)_defconfig'
 	$(if $(UBOOT_CONFIG_FRAGMENTS),cd sources/u-boot && ./scripts/kconfig/merge_config.sh -m .config $(abspath $(UBOOT_CONFIG_FRAGMENTS)))
 	$(if $(UBOOT_CONFIG_FRAGMENTS),$(MAKE) -C sources/u-boot/ $(MAKEFLAGS) olddefconfig)
@@ -563,7 +590,7 @@ clean:
 # marker actually assumes.
 distclean:
 	if [ -d output ]; then sudo rm -rf output; fi
-	rm -rf sources/apk-tools sources/u-boot sources/u-boot.ready sources/linux sources/linux.ready sources/atf sources/atf.ready sources/.tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
+	rm -rf sources/apk-tools sources/u-boot sources/u-boot.ready sources/linux sources/linux.ready sources/atf sources/atf.ready sources/.tree-prepared sources/.uboot-tree-prepared sources/.board-fallback.mk sources/.kernel-config-fingerprint sources/.uboot-config-fingerprint
 
 .PHONY: check-tools
 check-tools:

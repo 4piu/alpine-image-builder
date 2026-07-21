@@ -3,27 +3,26 @@
  * see target/README.md and common/patches/ for this target for
  * the driver itself; this overlay is just the devicetree side.
  *
- * GPIO assignments below come from decompiling the device tree baked
- * into Orange Pi's own official firmware for this exact board -- not
- * guessed or copied from a different board -- since mainline's own
- * DTS for this board has never wired this chip up at all (see
- * target/README.md for why).
+ * The mmc1 power-sequencing/regulator wiring (vmmc/vqmmc-supply,
+ * mmc-pwrseq, bus-width, non-removable) used to live here as a
+ * project-local overlay fragment, reverse-engineered by decompiling
+ * Orange Pi's own firmware DT. It's since been found to already exist
+ * as a real, importable patch upstream --
+ * common/patches/0006-dt-wifi-pwrseq-from-armbian.patch (adapted from
+ * armbian/build) -- which adds the same nodes, under the same labels
+ * (reg_vcc33_wifi, reg_vcc_wifi_io, wifi_pwrseq), directly to the base
+ * sun50i-h616-orangepi-zero.dtsi this board's own .dts already
+ * #includes. That patch is applied before this overlay, so this file
+ * only needs to reference &wifi_pwrseq etc. via the platform node below,
+ * not redefine them -- redefining the same node labels here as well
+ * would conflict at DT-compile time, not just duplicate work.
  *
- * wl-reg-on (PG18) is owned by mmc1's own mmc-pwrseq-simple, not by
- * the "unisoc,uwe_bsp" platform node below -- a first real-hardware
- * boot without it failed with "mmc1: Failed to initialize a
- * non-removable card": mmc1 only scans for its (non-removable) card
- * once, at boot, and nothing had powered the chip on by then --
- * uwe_bsp's own chip_power_on() (wcn_boot.c) only runs later, when
- * wifi is actually brought up by userspace, which is far too late for
- * mmc1's one-shot scan. mmc-pwrseq-simple powers the chip up as part
- * of mmc1's own probe, before that scan happens, which is exactly
- * what it's for. Same fix, same GPIO, and the same GPIO_ACTIVE_LOW
- * polarity (RST_N is a real active-low reset line) as the sibling
- * Zero2's own upstream, already-working sun50i-h616-orangepi-zero.dtsi
- * -- not a guess. uwe_bsp no longer requests this GPIO itself; its own
- * code already treats a missing/invalid wl-reg-on as "something else
- * owns power" and just skips managing it.
+ * What's left below has no Armbian equivalent, checked directly against
+ * every patch/kernel/, patch/misc/, and armbian/firmware tree that
+ * exists for this board (see notes/armbian-kernel-patches-brainstorm.md)
+ * -- it's specific to attaching *this* driver to the SDIO bus, not
+ * something Armbian's own DT patch (which only wires up mmc1's power
+ * sequencing, not the driver-facing platform node) needed to solve.
  *
  * pub-int-gpio (PG15, "wlan hostwake" on the real firmware's DT) is
  * deliberately NOT wired up here, and that's confirmed, not a gap:
@@ -37,15 +36,6 @@
  * it is a clean, supported way to disable this "public interrupt"/
  * wake-source feature, not a workaround. bt-wake-host-gpio (PG16) is
  * a separate, unrelated line and unaffected.
- *
- * Both fragments target by path (/soc/mmc@4021000, confirmed as
- * mmc1 from this board's own compiled dtb, matching both the real
- * firmware's decompiled DT and the sibling Zero2's upstream one),
- * not by label, even though patches/0003-enable-dtc-symbols-for-
- * overlay.patch does give the base dtb a real symbol table now --
- * that patch exists for the uwe-bsp node's own sdhci-name = <&mmc1>
- * property below, which does need it. No need to also switch the
- * fragment targets themselves over; target-path already works.
  */
 /dts-v1/;
 /plugin/;
@@ -56,78 +46,8 @@
 	compatible = "xunlong,orangepi-zero3", "allwinner,sun50i-h618";
 
 	fragment@0 {
-		target-path = "/soc/mmc@4021000";
-		__overlay__ {
-			bus-width = <4>;
-			non-removable;
-			mmc-pwrseq = <&wifi_pwrseq>;
-			/*
-			 * Dedicated onboard wifi regulators, not reg_dldo1 --
-			 * an earlier version of this overlay used reg_dldo1
-			 * (a fixed-3.3V PMIC rail) for both vmmc and vqmmc,
-			 * on the assumption this board has no separate wifi
-			 * supplies. That was wrong, confirmed by decompiling
-			 * Armbian's own live devicetree on this exact board:
-			 * it wires vmmc to a dedicated vcc33-wifi (3.3V) and
-			 * vqmmc to a dedicated vcc-wifi-io (1.8V) -- two
-			 * always-on fixed regulators private to the wifi
-			 * module, both declared in fragment@1 below, chained
-			 * off reg_vcc5v the same way Armbian's does. Running
-			 * vqmmc at reg_dldo1's fixed 3.3V instead of the real
-			 * 1.8V I/O rail didn't stop the SDIO card from
-			 * scanning or answering short register reads, but
-			 * reliably broke actual firmware-download bulk
-			 * writes ("not have card" mid-transfer) -- signal
-			 * levels marginal enough to pass light traffic but
-			 * not sustained DMA writes. vmmc alone (not vqmmc)
-			 * is what mmc_regulator_get_supply() (drivers/mmc/
-			 * core/regulator.c) uses to compute host->ocr_avail;
-			 * leaving either supply unset entirely reintroduces
-			 * the earlier "no support for card's volts" failure.
-			 */
-			vmmc-supply = <&reg_vcc33_wifi>;
-			vqmmc-supply = <&reg_vcc_wifi_io>;
-			status = "okay";
-		};
-	};
-
-	fragment@1 {
 		target-path = "/";
 		__overlay__ {
-			/* SOC pad -- none, always-on onboard LDO */
-			reg_vcc33_wifi: vcc33-wifi {
-				compatible = "regulator-fixed";
-				regulator-name = "vcc33-wifi";
-				regulator-min-microvolt = <3300000>;
-				regulator-max-microvolt = <3300000>;
-				regulator-always-on;
-				vin-supply = <&reg_vcc5v>;
-			};
-
-			/*
-			 * Stepped down from vcc33-wifi by a second
-			 * always-on onboard LDO -- matches Armbian's
-			 * vcc-wifi-io exactly (same vin-supply chain,
-			 * same fixed 1.8V), not a PMIC channel.
-			 */
-			reg_vcc_wifi_io: vcc-wifi-io {
-				compatible = "regulator-fixed";
-				regulator-name = "vcc-wifi-io";
-				regulator-min-microvolt = <1800000>;
-				regulator-max-microvolt = <1800000>;
-				regulator-always-on;
-				vin-supply = <&reg_vcc33_wifi>;
-			};
-
-			wifi_pwrseq: wifi-pwrseq {
-				compatible = "mmc-pwrseq-simple";
-				clocks = <&rtc 1>;
-				clock-names = "osc32k-out";
-				/* SOC pad PG18, module pad RST_N */
-				reset-gpios = <&pio 6 18 GPIO_ACTIVE_LOW>;
-				post-power-on-delay-ms = <200>;
-			};
-
 			/*
 			 * Node name matters here, separately from
 			 * "compatible": unisocwcn/sdio/sdiohal_main.c's
@@ -167,7 +87,9 @@
 				 * own POWERUP_WAIT_MS watchdog gives up first
 				 * and kills the connection outright -- not a
 				 * firmware, power-rail, or ADMA problem, just
-				 * this one missing phandle.
+				 * this one missing phandle. Needs this board's
+				 * dtb built with dtc's -@ symbol-table flag
+				 * (patches/0003) to resolve &mmc1 by label.
 				 */
 				sdhci-name = <&mmc1>;
 				/*

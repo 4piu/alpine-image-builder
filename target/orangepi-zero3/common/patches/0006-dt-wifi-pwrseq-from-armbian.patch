@@ -1,0 +1,86 @@
+# Adapted from armbian/build patch/kernel/archive/sunxi-6.18/patches.armbian/
+# arm64-dts-sun50i-h616-orangepi-zero2-zero3-add-wifi.patch (Gunjan Gupta,
+# Dec 2023) -- regenerated against this project's current tree since the
+# original no longer applies via a plain `git apply` (context drift since
+# Dec 2023; `patch --fuzz=3` still applies both hunks unchanged, just at a
+# different line offset -- content match, not a rewrite). Adds the
+# vcc33-wifi/vcc-wifi-io regulators and the wifi_pwrseq node
+# (mmc-pwrseq-simple, PG18) to the shared sun50i-h616-orangepi-zero.dtsi --
+# this is what common/overlays/sun50i-h618-orangepi-zero3-wifi.dts used to
+# duplicate as a project-local overlay fragment before this was found; see
+# that overlay's own header for what's left after this patch covers the
+# power-sequencing half. Recheck against upstream on the next
+# KERNEL_VERSION bump -- see notes/armbian-kernel-patches-brainstorm.md.
+#
+# Worth recording here since it's this project's own finding, not
+# Armbian's: &mmc1's vqmmc-supply has to be a dedicated 1.8V rail
+# (vcc-wifi-io below), not reg_dldo1 (a fixed-3.3V PMIC rail this board
+# also has). An earlier version of this project's own overlay used
+# reg_dldo1 for both vmmc and vqmmc -- confirmed on real hardware that
+# running vqmmc at 3.3V instead of the real 1.8V I/O rail doesn't stop the
+# SDIO card from scanning or answering short register reads, but reliably
+# breaks actual firmware-download bulk writes ("not have card" mid-transfer)
+# -- signal levels marginal enough to pass light traffic but not sustained
+# DMA writes. vmmc alone (not vqmmc) is what mmc_regulator_get_supply()
+# (drivers/mmc/core/regulator.c) uses to compute host->ocr_avail; leaving
+# either supply unset entirely reintroduces the earlier "no support for
+# card's volts" failure. Armbian's own patch already gets this right
+# (matches exactly, confirmed by reading the diff) -- recorded here in case
+# a future kernel/DT change makes it tempting to "simplify" back to one
+# shared rail.
+diff --git a/arch/arm64/boot/dts/allwinner/sun50i-h616-orangepi-zero.dtsi b/arch/arm64/boot/dts/allwinner/sun50i-h616-orangepi-zero.dtsi
+index a8644fb52..0b45249e8 100644
+--- a/arch/arm64/boot/dts/allwinner/sun50i-h616-orangepi-zero.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun50i-h616-orangepi-zero.dtsi
+@@ -57,6 +57,34 @@ reg_usb1_vbus: regulator-usb1-vbus {
+ 		enable-active-high;
+ 		gpio = <&pio 2 16 GPIO_ACTIVE_HIGH>; /* PC16 */
+ 	};
++
++	reg_vcc33_wifi: vcc33-wifi {
++		/* Always on 3.3V regulator for WiFi and BT */
++		compatible = "regulator-fixed";
++		regulator-name = "vcc33-wifi";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++		vin-supply = <&reg_vcc5v>;
++	};
++
++	reg_vcc_wifi_io: vcc-wifi-io {
++		/* Always on 1.8V/300mA regulator for WiFi and BT IO */
++		compatible = "regulator-fixed";
++		regulator-name = "vcc-wifi-io";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		regulator-always-on;
++		vin-supply = <&reg_vcc33_wifi>;
++	};
++
++	wifi_pwrseq: wifi-pwrseq {
++		compatible = "mmc-pwrseq-simple";
++		clocks = <&rtc 1>;
++		clock-names = "osc32k-out";
++		reset-gpios = <&pio 6 18 GPIO_ACTIVE_LOW>; /* PG18 */
++		post-power-on-delay-ms = <200>;
++	};
+ };
+ 
+ &codec {
+@@ -95,6 +123,16 @@ &mmc0 {
+ 	status = "okay";
+ };
+ 
++&mmc1 {
++	vmmc-supply = <&reg_vcc33_wifi>;
++	vqmmc-supply = <&reg_vcc_wifi_io>;
++	mmc-pwrseq = <&wifi_pwrseq>;
++	bus-width = <4>;
++	non-removable;
++	mmc-ddr-1_8v;
++	status = "okay";
++};
++
+ &ohci1 {
+ 	status = "okay";
+ };
